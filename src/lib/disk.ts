@@ -51,6 +51,14 @@ export function diskPath(id: string): string | null {
   return paths.get(id) ?? null;
 }
 
+export function setDiskPath(id: string, path: string) {
+  paths.set(id, path);
+}
+
+export function forgetDisk(id: string) {
+  paths.delete(id);
+}
+
 export function withoutDisk<T extends { nodes: Record<string, FsNode>; order: Record<string, string[]> }>(snap: T): T {
   const nodes: Record<string, FsNode> = {};
   const order: Record<string, string[]> = {};
@@ -73,6 +81,10 @@ type RawEntry = {
   hidden: boolean;
   readonly: boolean;
   system: boolean;
+  mounted?: boolean;
+  capacity?: number | null;
+  free?: number | null;
+  media?: string;
 };
 
 async function invoke<T>(command: string, args?: Record<string, unknown>): Promise<T> {
@@ -92,7 +104,23 @@ function makeNode(id: string, parentId: string | null, entry: RawEntry): FsNode 
     hidden: entry.hidden,
     readonly: entry.readonly,
     system: entry.system,
+    mounted: entry.mounted,
+    capacity: entry.capacity ?? undefined,
+    free: entry.free ?? undefined,
+    note: entry.media || undefined,
   };
+}
+
+export async function fetchDrives(): Promise<FsNode[]> {
+  const drives = await invoke<RawEntry[]>("drives");
+  return drives.map((entry) => {
+    const id = nextDiskId();
+    return makeNode(id, "pc", entry);
+  });
+}
+
+export async function unmountVolume(path: string): Promise<string> {
+  return invoke<string>("unmount_drive", { path });
 }
 
 export async function loadDesktopComputer(): Promise<{ nodes: Record<string, FsNode>; order: Record<string, string[]>; openId: string }> {

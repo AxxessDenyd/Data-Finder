@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { diskCreate, diskRemoveNamed, diskRename, diskTransfer, isDesktop, isDiskId, loadChildren, loadDesktopComputer, measureChildren, pickFolder, readDiskText, type DiskJob } from "@/lib/disk";
+import { diskCreate, diskPath, diskRemoveNamed, diskRename, diskTransfer, fetchDrives, forgetDisk, isDesktop, isDiskId, loadChildren, loadDesktopComputer, measureChildren, pickFolder, readDiskText, setDiskPath, unmountVolume, type DiskJob } from "@/lib/disk";
 import {
   childrenOf,
   cloneSubtree,
@@ -97,7 +97,8 @@ export type DialogState =
   | { kind: "search" }
   | { kind: "operation" }
   | { kind: "mask" }
-  | { kind: "restore" };
+  | { kind: "restore" }
+  | { kind: "unmount"; id: string };
 
 export interface SearchRequest {
   query?: string;
@@ -403,6 +404,7 @@ interface Actions {
   restoreSample: () => void;
   openReader: (id: string | null) => void;
   openFolder: (index?: 0 | 1) => Promise<void>;
+  unmountDrive: (id?: string) => Promise<void>;
   openTypedPath: (raw: string) => Promise<boolean>;
   hydrate: (prefs: UiPrefs) => void;
 }
@@ -703,6 +705,10 @@ export const useFiles = create<FileState & Actions>((set, get) => ({
   navigate: (index, id, push = true) => {
     const node = get().nodes[id];
     if (!node || node.kind === "file") return;
+    if (node.kind === "drive" && node.mounted === false) {
+      set({ status: `${node.name} is not mounted` });
+      return;
+    }
     if (isDiskId(id) && !Object.prototype.hasOwnProperty.call(get().order, id)) {
       set({ status: `Reading ${node.name}` });
       void loadChildren(id)
@@ -1906,6 +1912,90 @@ export const useFiles = create<FileState & Actions>((set, get) => ({
   },
 
   openReader: (id) => set({ readerId: id && get().nodes[id] ? id : null, menu: null }),
+
+  unmountDrive: async (id) => {
+    const state = get();
+    const target = id ?? state.panes[state.active].pathId;
+    const drive = state.nodes[target]?.kind === "drive" ? state.nodes[target] : driveOf(state, target);
+    if (!drive || drive.kind !== "drive") {
+      set({ status: "Select a drive to unmount" });
+      return;
+    }
+    if (drive.mounted === false) {
+      set({ status: `${drive.name} is already not mounted`, dialog: null });
+      return;
+    }
+    if (!isDiskId(drive.id)) {
+      const nodes = { ...state.nodes, [drive.id]: { ...drive, mounted: false } };
+      const panes = state.panes.map((pane) => {
+        const inside = pane.pathId === drive.id || driveOf({ nodes: state.nodes, order: state.order }, pane.pathId)?.id === drive.id;
+        return inside ? { ...pane, pathId: "pc", selected: [] as string[], anchor: null } : pane;
+      }) as [PaneModel, PaneModel];
+      set({ nodes, panes, dialog: null, status: `${drive.name} unmounted` });
+      return;
+    }
+    const path = diskPath(drive.id);
+    if (!path) {
+      set({ status: "That drive is not open" });
+      return;
+    }
+    try {
+      set({ status: `Unmounting ${drive.name}` });
+      const message = await unmountVolume(path);
+      const fresh = await fetchDrives();
+      set((current) => {
+        let nodes = { ...current.nodes };
+        let order = { ...current.order };
+        const oldIds = (order.pc ?? []).filter((item) => isDiskId(item) && nodes[item]?.kind === "drive");
+        const used = new Set<string>();
+        const kept: string[] = [];
+        for (const oldId of oldIds) {
+          const old = nodes[oldId];
+          const match = fresh.find((node) => !used.has(node.id) && node.name.toLowerCase() === old.name.toLowerCase());
+          if (!match) {
+            const cleaned = dropLoaded(nodes, order, oldId);
+            nodes = cleaned.nodes;
+            order = cleaned.order;
+            delete nodes[oldId];
+            forgetDisk(oldId);
+            continue;
+          }
+          used.add(match.id);
+          const nextPath = diskPath(match.id);
+          if (nextPath) setDiskPath(oldId, nextPath);
+          forgetDisk(match.id);
+          nodes[oldId] = {
+            ...old,
+            name: match.name,
+            mounted: match.mounted,
+            capacity: match.capacity,
+            free: match.free,
+            note: match.note,
+            system: match.system,
+          };
+          kept.push(oldId);
+        }
+        for (const node of fresh) {
+          if (used.has(node.id)) continue;
+          nodes[node.id] = node;
+          kept.push(node.id);
+        }
+        order = { ...order, pc: kept };
+        const panes = current.panes.map((pane) => {
+          const pathId = nodes[pane.pathId] ? pane.pathId : "pc";
+          return {
+            ...pane,
+            pathId,
+            selected: pane.selected.filter((item) => nodes[item]),
+            anchor: pane.anchor && nodes[pane.anchor] ? pane.anchor : null,
+          };
+        }) as [PaneModel, PaneModel];
+        return { nodes, order, panes, dialog: null, clipboard: null, status: message };
+      });
+    } catch (error) {
+      set({ dialog: null, status: error instanceof Error ? error.message : "Could not unmount that drive" });
+    }
+  },
 
   openFolder: async (index) => {
     const pane = index ?? get().active;

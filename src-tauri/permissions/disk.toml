@@ -11,4 +11,5 @@ commands.allow = [
   "copy_item",
   "move_item",
   "measure_children",
+  "unmount_drive",
 ]

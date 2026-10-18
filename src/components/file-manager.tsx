@@ -44,6 +44,7 @@ import {
   Star,
   Table,
   Trash2,
+  Unplug,
   X,
 } from "lucide-react";
 import {
@@ -378,6 +379,7 @@ function HomeRibbon() {
   const favorites = useFiles((s) => s.favorites);
   const recent = useFiles((s) => s.recent);
   const nodes = useFiles((s) => s.nodes);
+  const order = useFiles((s) => s.order);
   const infoCount = selected.length;
   const infoBytes = selected.reduce((sum, id) => sum + (nodes[id]?.bytes ?? 0), 0);
   const infoKnown = selected.every((id) => nodes[id]?.bytes != null);
@@ -430,6 +432,10 @@ function HomeRibbon() {
       <GroupBox title="Go">
         <RibbonButton label="Up" icon={<ArrowUp className="size-4" />} onClick={() => store().goUp()} />
         <RibbonButton label={desktop ? "This computer" : "Open folder"} icon={<HardDrive className="size-4" />} onClick={() => void store().openFolder()} />
+        <RibbonButton label="Unmount" icon={<Unplug className="size-4" />} disabled={!driveOf({ nodes, order }, pathId) || driveOf({ nodes, order }, pathId)?.mounted === false} onClick={() => {
+          const drive = driveOf(useFiles.getState(), useFiles.getState().panes[useFiles.getState().active].pathId);
+          if (drive) store().openDialog({ kind: "unmount", id: drive.id });
+        }} />
         <RibbonButton label="Refresh" icon={<RefreshCw className="size-4" />} onClick={() => store().refresh()} />
         <RibbonButton label="Measure" icon={<Ruler className="size-4" />} onClick={() => void store().calcSizes()} />
         <RibbonButton label={barMode === "log" ? "Compressed" : "Even bars"} icon={<Scale className="size-4" />} active={barMode === "log"} onClick={() => store().toggleBarMode()} />
@@ -735,7 +741,7 @@ function TreeBranch({ id, depth, pane }: { id: string; depth: number; pane: 0 | 
     .map((cid) => nodes[cid])
     .filter((item) => item && item.kind !== "file" && flagVisible(item, visibility));
   const here = pathId === id;
-  const label = node.kind === "drive" ? `${node.name}\\ [${node.note ?? "Disk"}]` : node.name;
+  const label = node.kind === "drive" ? `${node.name}\\ · ${node.mounted === false ? "Not mounted" : "Mounted"}` : node.name;
   return (
     <div>
       <button
@@ -924,7 +930,7 @@ function PaneView({ index }: { index: 0 | 1 }) {
                 const selected = pane.selected.includes(row.id);
                 const pct = barPercent(row.bytes, max, barMode);
                 const cut = clipboard?.mode === "cut" && row.nodeId && clipboard.ids.includes(row.nodeId);
-                const kind = typeLabel({ kind: row.kind, name: row.name } as FsNode);
+                const kind = typeLabel(row.nodeId && nodes[row.nodeId] ? nodes[row.nodeId] : ({ kind: row.kind, name: row.name } as FsNode));
                 const when = formatWhen(row.modified, state.dateFormat, state.timeFormat);
                 return (
                   <tr
@@ -1036,10 +1042,14 @@ function PaneView({ index }: { index: 0 | 1 }) {
         )}
         {drive && (
           <span className="flex shrink-0 items-center gap-2">
-            <span className="tabular-nums">{drive.name}\ {formatSize(drive.capacity)} ({freePct}% Free)</span>
-            <span className="h-3 w-28 overflow-hidden border border-line bg-pane">
-              <span className="block h-full bg-free" style={{ width: `${freePct}%` }} />
+            <span className="tabular-nums">
+              {drive.name}\ {drive.mounted === false ? "Not mounted" : `Mounted${drive.capacity ? ` · ${formatSize(drive.capacity)} (${freePct}% Free)` : ""}`}
             </span>
+            {drive.mounted !== false && !!drive.capacity && (
+              <span className="h-3 w-28 overflow-hidden border border-line bg-pane">
+                <span className="block h-full bg-free" style={{ width: `${freePct}%` }} />
+              </span>
+            )}
           </span>
         )}
       </footer>
@@ -1110,6 +1120,7 @@ function DetailsStrip({ index, compact = false, className = "" }: { index: 0 | 1
       </div>
       <div className="flex flex-wrap gap-x-3">
         <span className="tabular-nums">{shownSize(node.bytes, node.approx) || "Not measured"}</span>
+        {node.kind === "drive" && <span>{node.mounted === false ? "Not mounted" : "Mounted"}</span>}
         <span className="text-muted">{flags}</span>
       </div>
       <div className="break-all text-muted" title={place}>{place}</div>
@@ -1547,6 +1558,20 @@ function Dialogs() {
             </div>
           </div>
         )}
+        {dialog.kind === "unmount" && nodes[dialog.id] && (
+          <div>
+            <h2 className="text-base font-semibold">Unmount {nodes[dialog.id].name}?</h2>
+            <p className="mt-2 text-sm text-muted">
+              {nodes[dialog.id].system
+                ? "Windows is running from this drive, so it stays mounted."
+                : "Open files on it will close. A removable drive is ejected. The Windows drive cannot be unmounted."}
+            </p>
+            <div className="mt-3 flex justify-end gap-2">
+              <button type="button" className="min-h-11 px-3" onClick={() => useFiles.getState().openDialog(null)}>Cancel</button>
+              <button type="button" className="min-h-11 bg-accent px-3 text-accent-ink" disabled={nodes[dialog.id].mounted === false} onClick={() => void useFiles.getState().unmountDrive(dialog.id)}>Unmount</button>
+            </div>
+          </div>
+        )}
         {dialog.kind === "props" && nodes[dialog.id] && <Props id={dialog.id} />}
         {dialog.kind === "restore" && (
           <div>
@@ -1808,6 +1833,7 @@ function Props({ id }: { id: string }) {
     ["Type", typeLabel(node)],
     ["Location", displayPath(snap, id)],
     ["Size", shownSize(node.bytes, node.approx) || "Not measured"],
+    ["Mounted", node.kind === "drive" ? (node.mounted === false ? "Not mounted" : "Mounted") : "—"],
     ["Contains", node.kind === "file" ? "—" : `${kids} direct items`],
     ["Modified", formatDate(node.modified)],
     ["Flags", [node.hidden && "Hidden", node.readonly && "Read-only", node.system && "System"].filter(Boolean).join(", ") || "Normal"],
@@ -1865,6 +1891,7 @@ function ContextMenu() {
         {node && item("Rename", () => useFiles.getState().openDialog({ kind: "rename", id: node.id, name: node.name }))}
         {id && item("Delete", () => useFiles.getState().openDialog({ kind: "delete", ids: useFiles.getState().panes[useFiles.getState().active].selected.length ? useFiles.getState().panes[useFiles.getState().active].selected : [id] }))}
         {id && item("Info", () => useFiles.getState().openDialog({ kind: "props", id }))}
+        {node?.kind === "drive" && node.mounted !== false && item("Unmount", () => useFiles.getState().openDialog({ kind: "unmount", id: node.id }))}
         {item("Copy location", () => {
           const state = useFiles.getState();
           void state.copyPath(id ?? state.panes[state.active].pathId);

@@ -16,6 +16,8 @@ export interface FsNode {
   note?: string;
   /** True when a real-disk folder walk stopped early. The size is a minimum. */
   approx?: boolean;
+  /** False when a drive has no media or no mount point. */
+  mounted?: boolean;
 }
 
 export interface FsSnapshot {
@@ -59,7 +61,11 @@ export function formatDate(ts: number): string {
 }
 
 export function typeLabel(node: FsNode): string {
-  if (node.kind === "dir" || node.kind === "drive") return "File Folder";
+  if (node.kind === "drive") {
+    const mount = node.mounted === false ? "Not mounted" : "Mounted";
+    return node.note ? `${mount} · ${node.note}` : mount;
+  }
+  if (node.kind === "dir") return "File Folder";
   if (node.kind === "computer") return "Computer";
   const ext = node.name.includes(".") ? node.name.split(".").pop()!.toUpperCase() : "";
   if (!ext) return "File";
@@ -91,6 +97,7 @@ export function createSeed(): FsSnapshot {
       capacity: extra.capacity,
       free: extra.free,
       note: extra.note,
+      mounted: extra.mounted,
     };
     if (parentId) {
       (order[parentId] ??= []).push(id);
@@ -106,6 +113,7 @@ export function createSeed(): FsSnapshot {
     free: 1.86 * TB * 0.86,
     modified: d(0, 12, 5),
     note: "Local Disk",
+    mounted: true,
   });
   const backup = add(pc, "D:", "drive", {
     id: "d",
@@ -113,6 +121,7 @@ export function createSeed(): FsSnapshot {
     free: 4 * TB * 0.41,
     modified: d(12),
     note: "Backup",
+    mounted: true,
   });
   const cloud = add(pc, "G:", "drive", {
     id: "g",
@@ -120,6 +129,7 @@ export function createSeed(): FsSnapshot {
     free: 2 * TB * 0.72,
     modified: d(3),
     note: "Google Drive",
+    mounted: true,
   });
 
   add(c, "$Recycle.Bin", "dir", { hidden: true, system: true, modified: d(6, 9, 55) });

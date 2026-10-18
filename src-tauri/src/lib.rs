@@ -13,6 +13,10 @@ struct DiskEntry {
     hidden: bool,
     readonly: bool,
     system: bool,
+    mounted: bool,
+    capacity: Option<u64>,
+    free: Option<u64>,
+    media: String,
 }
 
 #[derive(Serialize)]
@@ -59,32 +63,22 @@ fn push_entry(out: &mut Vec<DiskEntry>, name: String, path: PathBuf, meta: &fs::
         hidden,
         readonly,
         system,
+        mounted: true,
+        capacity: None,
+        free: None,
+        media: String::new(),
     });
 }
 
 #[tauri::command]
 fn drives() -> Vec<DiskEntry> {
-    let mut out = Vec::new();
     #[cfg(windows)]
     {
-        for letter in b'A'..=b'Z' {
-            let path = format!("{}:\\", letter as char);
-            if Path::new(&path).exists() {
-                out.push(DiskEntry {
-                    name: format!("{}:", letter as char),
-                    path,
-                    kind: "drive".into(),
-                    bytes: None,
-                    modified: 0,
-                    hidden: false,
-                    readonly: false,
-                    system: false,
-                });
-            }
-        }
+        windows_drives()
     }
     #[cfg(not(windows))]
     {
+        let mut out = Vec::new();
         if Path::new("/").exists() {
             out.push(DiskEntry {
                 name: "/".into(),
@@ -95,10 +89,329 @@ fn drives() -> Vec<DiskEntry> {
                 hidden: false,
                 readonly: false,
                 system: false,
+                mounted: true,
+                capacity: None,
+                free: None,
+                media: "Local".into(),
             });
         }
+        out
+    }
+}
+
+#[cfg(windows)]
+fn wide(text: &str) -> Vec<u16> {
+    use std::ffi::OsStr;
+    use std::os::windows::ffi::OsStrExt;
+    OsStr::new(text).encode_wide().chain(std::iter::once(0)).collect()
+}
+
+#[cfg(windows)]
+fn from_wide(buf: &[u16]) -> String {
+    let end = buf.iter().position(|unit| *unit == 0).unwrap_or(buf.len());
+    String::from_utf16_lossy(&buf[..end])
+}
+
+#[cfg(windows)]
+fn multi_wide(buf: &[u16]) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut start = 0;
+    for (index, unit) in buf.iter().enumerate() {
+        if *unit != 0 {
+            continue;
+        }
+        if index == start {
+            break;
+        }
+        out.push(String::from_utf16_lossy(&buf[start..index]));
+        start = index + 1;
     }
     out
+}
+
+#[cfg(windows)]
+mod winvol {
+    pub const DRIVE_REMOVABLE: u32 = 2;
+    pub const DRIVE_FIXED: u32 = 3;
+    pub const DRIVE_REMOTE: u32 = 4;
+    pub const DRIVE_CDROM: u32 = 5;
+    pub const DRIVE_RAMDISK: u32 = 6;
+    pub const GENERIC_READ: u32 = 0x8000_0000;
+    pub const GENERIC_WRITE: u32 = 0x4000_0000;
+    pub const FILE_SHARE_READ: u32 = 1;
+    pub const FILE_SHARE_WRITE: u32 = 2;
+    pub const OPEN_EXISTING: u32 = 3;
+    pub const FSCTL_LOCK_VOLUME: u32 = 0x0009_0018;
+    pub const FSCTL_DISMOUNT_VOLUME: u32 = 0x0009_0020;
+    pub const IOCTL_STORAGE_EJECT_MEDIA: u32 = 0x002D_4808;
+    pub const ERROR_MORE_DATA: u32 = 234;
+    pub const INVALID_HANDLE: isize = -1;
+
+    #[link(name = "kernel32")]
+    extern "system" {
+        pub fn GetLogicalDrives() -> u32;
+        pub fn GetDriveTypeW(root: *const u16) -> u32;
+        pub fn GetDiskFreeSpaceExW(dir: *const u16, free: *mut u64, total: *mut u64, total_free: *mut u64) -> i32;
+        pub fn GetVolumeInformationW(
+            root: *const u16,
+            name: *mut u16,
+            name_len: u32,
+            serial: *mut u32,
+            max_component: *mut u32,
+            flags: *mut u32,
+            fs: *mut u16,
+            fs_len: u32,
+        ) -> i32;
+        pub fn FindFirstVolumeW(name: *mut u16, len: u32) -> isize;
+        pub fn FindNextVolumeW(handle: isize, name: *mut u16, len: u32) -> i32;
+        pub fn FindVolumeClose(handle: isize) -> i32;
+        pub fn GetVolumePathNamesForVolumeNameW(volume: *const u16, paths: *mut u16, len: u32, returned: *mut u32) -> i32;
+        pub fn GetWindowsDirectoryW(buf: *mut u16, len: u32) -> u32;
+        pub fn CreateFileW(
+            name: *const u16,
+            access: u32,
+            share: u32,
+            security: *mut core::ffi::c_void,
+            disposition: u32,
+            flags: u32,
+            template: isize,
+        ) -> isize;
+        pub fn DeviceIoControl(
+            handle: isize,
+            code: u32,
+            input: *mut core::ffi::c_void,
+            input_len: u32,
+            output: *mut core::ffi::c_void,
+            output_len: u32,
+            returned: *mut u32,
+            overlapped: *mut core::ffi::c_void,
+        ) -> i32;
+        pub fn CloseHandle(handle: isize) -> i32;
+        pub fn DeleteVolumeMountPointW(path: *const u16) -> i32;
+        pub fn GetLastError() -> u32;
+    }
+
+    #[link(name = "mpr")]
+    extern "system" {
+        pub fn WNetCancelConnection2W(name: *const u16, flags: u32, force: i32) -> u32;
+    }
+}
+
+#[cfg(windows)]
+fn media_name(kind: u32) -> &'static str {
+    match kind {
+        winvol::DRIVE_REMOVABLE => "Removable",
+        winvol::DRIVE_FIXED => "Local",
+        winvol::DRIVE_REMOTE => "Network",
+        winvol::DRIVE_CDROM => "Optical",
+        winvol::DRIVE_RAMDISK => "RAM",
+        _ => "Unknown",
+    }
+}
+
+#[cfg(windows)]
+fn volume_label(root: &str) -> String {
+    let mut name = [0u16; 64];
+    let ok = unsafe {
+        winvol::GetVolumeInformationW(
+            wide(root).as_ptr(),
+            name.as_mut_ptr(),
+            name.len() as u32,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    if ok == 0 {
+        return String::new();
+    }
+    from_wide(&name).trim().to_string()
+}
+
+#[cfg(windows)]
+fn windows_letter() -> Option<char> {
+    let mut buf = [0u16; 260];
+    let len = unsafe { winvol::GetWindowsDirectoryW(buf.as_mut_ptr(), buf.len() as u32) };
+    if len == 0 {
+        return None;
+    }
+    from_wide(&buf).chars().next().map(|ch| ch.to_ascii_uppercase())
+}
+
+#[cfg(windows)]
+fn windows_drives() -> Vec<DiskEntry> {
+    let mut out = Vec::new();
+    let mask = unsafe { winvol::GetLogicalDrives() };
+    for index in 0..26 {
+        if mask & (1 << index) == 0 {
+            continue;
+        }
+        let letter = (b'A' + index) as char;
+        let root = format!("{letter}:\\");
+        let kind = unsafe { winvol::GetDriveTypeW(wide(&root).as_ptr()) };
+        if kind == 1 {
+            continue;
+        }
+        let mut caller_free = 0u64;
+        let mut total = 0u64;
+        let ready = unsafe { winvol::GetDiskFreeSpaceExW(wide(&root).as_ptr(), &mut caller_free, &mut total, std::ptr::null_mut()) } != 0;
+        let label = if ready { volume_label(&root) } else { String::new() };
+        let media = media_name(kind);
+        out.push(DiskEntry {
+            name: format!("{letter}:"),
+            path: root,
+            kind: "drive".into(),
+            bytes: None,
+            modified: 0,
+            hidden: false,
+            readonly: false,
+            system: windows_letter() == Some(letter.to_ascii_uppercase()),
+            mounted: ready,
+            capacity: if ready { Some(total) } else { None },
+            free: if ready { Some(caller_free) } else { None },
+            media: if label.is_empty() { media.into() } else { format!("{media} · {label}") },
+        });
+    }
+
+    let mut volume = [0u16; 260];
+    let handle = unsafe { winvol::FindFirstVolumeW(volume.as_mut_ptr(), volume.len() as u32) };
+    if handle != winvol::INVALID_HANDLE && handle != 0 {
+        let mut disks = 1u32;
+        loop {
+            let vol = from_wide(&volume);
+            let mut paths = [0u16; 1024];
+            let mut returned = 0u32;
+            let ok = unsafe {
+                winvol::GetVolumePathNamesForVolumeNameW(wide(&vol).as_ptr(), paths.as_mut_ptr(), paths.len() as u32, &mut returned)
+            };
+            let err = if ok == 0 { unsafe { winvol::GetLastError() } } else { 0 };
+            let mounted_somewhere = ok != 0 && multi_wide(&paths).iter().any(|path| !path.is_empty());
+            if !mounted_somewhere && err != winvol::ERROR_MORE_DATA {
+                let label = volume_label(&vol);
+                out.push(DiskEntry {
+                    name: if label.is_empty() { format!("Disk {disks}") } else { label },
+                    path: vol,
+                    kind: "drive".into(),
+                    bytes: None,
+                    modified: 0,
+                    hidden: false,
+                    readonly: false,
+                    system: false,
+                    mounted: false,
+                    capacity: None,
+                    free: None,
+                    media: "No letter".into(),
+                });
+                disks += 1;
+            }
+            volume = [0; 260];
+            if unsafe { winvol::FindNextVolumeW(handle, volume.as_mut_ptr(), volume.len() as u32) } == 0 {
+                break;
+            }
+        }
+        unsafe { winvol::FindVolumeClose(handle); }
+    }
+    out
+}
+
+#[cfg(windows)]
+fn device_path(path: &str) -> String {
+    if path.starts_with("\\\\?\\Volume") || path.starts_with("\\\\.\\Volume") {
+        let trimmed = path.trim_end_matches('\\');
+        return trimmed.replacen("\\\\?\\", "\\\\.\\", 1);
+    }
+    let letter = path.chars().next().unwrap_or('C');
+    format!("\\\\.\\{letter}:")
+}
+
+#[cfg(windows)]
+fn ioctl(handle: isize, code: u32) -> bool {
+    let mut returned = 0u32;
+    unsafe {
+        winvol::DeviceIoControl(
+            handle,
+            code,
+            std::ptr::null_mut(),
+            0,
+            std::ptr::null_mut(),
+            0,
+            &mut returned,
+            std::ptr::null_mut(),
+        ) != 0
+    }
+}
+
+#[cfg(windows)]
+fn unmount_windows(path: &str) -> Result<String, String> {
+    let root = if path.starts_with("\\\\") {
+        if path.ends_with('\\') { path.to_string() } else { format!("{path}\\") }
+    } else {
+        let letter = path.chars().next().ok_or_else(|| "That drive is not mounted".to_string())?;
+        format!("{}:\\", letter.to_ascii_uppercase())
+    };
+    if let Some(letter) = root.chars().next() {
+        if !root.starts_with("\\\\") && windows_letter() == Some(letter.to_ascii_uppercase()) {
+            return Err("Windows is running from this drive, so it stays mounted".into());
+        }
+    }
+    let kind = unsafe { winvol::GetDriveTypeW(wide(&root).as_ptr()) };
+    if kind == winvol::DRIVE_REMOTE {
+        let share = root.trim_end_matches('\\');
+        let code = unsafe { winvol::WNetCancelConnection2W(wide(share).as_ptr(), 0, 1) };
+        if code != 0 {
+            return Err(format!("Could not disconnect {share} ({code})"));
+        }
+        return Ok(format!("{share} disconnected"));
+    }
+    let handle = unsafe {
+        winvol::CreateFileW(
+            wide(&device_path(&root)).as_ptr(),
+            winvol::GENERIC_READ | winvol::GENERIC_WRITE,
+            winvol::FILE_SHARE_READ | winvol::FILE_SHARE_WRITE,
+            std::ptr::null_mut(),
+            winvol::OPEN_EXISTING,
+            0,
+            0,
+        )
+    };
+    if handle == winvol::INVALID_HANDLE {
+        let code = unsafe { winvol::GetLastError() };
+        return Err(format!("Could not open that drive ({code}). Close anything using it and try again."));
+    }
+    let _locked = ioctl(handle, winvol::FSCTL_LOCK_VOLUME);
+    let dismounted = ioctl(handle, winvol::FSCTL_DISMOUNT_VOLUME);
+    let ejected = if kind == winvol::DRIVE_REMOVABLE || kind == winvol::DRIVE_CDROM {
+        ioctl(handle, winvol::IOCTL_STORAGE_EJECT_MEDIA)
+    } else {
+        false
+    };
+    unsafe { winvol::CloseHandle(handle); }
+    let mut letter_removed = false;
+    if root.chars().nth(1) == Some(':') {
+        letter_removed = unsafe { winvol::DeleteVolumeMountPointW(wide(&root).as_ptr()) } != 0;
+    }
+    if !dismounted && !ejected && !letter_removed {
+        return Err("Could not unmount that drive. Close anything using it and try again.".into());
+    }
+    if ejected {
+        return Ok(format!("{root} ejected"));
+    }
+    Ok(format!("{root} unmounted"))
+}
+
+#[tauri::command]
+fn unmount_drive(path: String) -> Result<String, String> {
+    #[cfg(windows)]
+    {
+        unmount_windows(&path)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = path;
+        Err("Unmount only works in the Windows program".into())
+    }
 }
 
 #[tauri::command]
@@ -311,7 +624,8 @@ pub fn run() {
             read_text,
             copy_item,
             move_item,
-            measure_children
+            measure_children,
+            unmount_drive
         ])
         .run(tauri::generate_context!())
         .expect("Data Finder failed to start");
