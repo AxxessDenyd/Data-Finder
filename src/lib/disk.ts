@@ -328,48 +328,52 @@ export async function diskTransfer(jobs: DiskJob[], destId: string, mode: "copy"
   }
 }
 
-async function liveDirBytes(dir: DirHandle, budget: { n: number }): Promise<number | null> {
+async function liveDirBytes(dir: DirHandle, budget: { n: number }): Promise<{ bytes: number; partial: boolean }> {
   let total = 0;
+  let partial = false;
   for await (const [, child] of dir.entries()) {
-    if (budget.n <= 0) return null;
+    if (budget.n <= 0) return { bytes: total, partial: true };
     budget.n -= 1;
     const file = asFile(child);
     if (file) {
       try {
         total += (await file.getFile()).size;
       } catch {
-        /* unreadable file */
+        partial = true;
       }
     } else {
       const nested = asDir(child);
       if (!nested) continue;
-      const bytes = await liveDirBytes(nested, budget);
-      if (bytes == null) return null;
-      total += bytes;
+      const inner = await liveDirBytes(nested, budget);
+      total += inner.bytes;
+      if (inner.partial) partial = true;
     }
   }
-  return total;
+  return { bytes: total, partial };
 }
 
-export async function measureChildren(id: string): Promise<Record<string, number>> {
-  const sizes: Record<string, number> = {};
+export type MeasuredSize = { bytes: number; partial: boolean };
+
+export async function measureChildren(id: string): Promise<Record<string, MeasuredSize>> {
+  const sizes: Record<string, MeasuredSize> = {};
   if (id.startsWith("disk:")) {
     const path = paths.get(id);
     if (!path) return sizes;
-    const rows = await invoke<{ name: string; bytes: number | null }[]>("measure_children", { path });
+    const rows = await invoke<{ name: string; bytes: number | null; partial?: boolean }[]>("measure_children", { path });
     for (const row of rows) {
-      if (row.bytes != null) sizes[row.name.toLowerCase()] = row.bytes;
+      if (row.bytes == null) continue;
+      sizes[row.name.toLowerCase()] = { bytes: row.bytes, partial: !!row.partial };
     }
     return sizes;
   }
   const handle = asDir(handles.get(id));
   if (!handle) return sizes;
-  const budget = { n: 20000 };
   for await (const [name, child] of handle.entries()) {
     const dir = asDir(child);
     if (!dir) continue;
-    const bytes = await liveDirBytes(dir, budget);
-    if (bytes != null) sizes[name.toLowerCase()] = bytes;
+    const measured = await liveDirBytes(dir, { n: 25000 });
+    if (measured.bytes === 0 && measured.partial) continue;
+    sizes[name.toLowerCase()] = { bytes: measured.bytes, partial: measured.partial };
   }
   return sizes;
 }

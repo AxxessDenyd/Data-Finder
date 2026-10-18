@@ -31,6 +31,7 @@ import {
   ListFilter,
   ListTree,
   Menu,
+  Moon,
   Monitor,
   Music,
   Pencil,
@@ -73,6 +74,12 @@ const UI_KEY = "data-finder-ui";
 const CATALOG_KEY = "data-finder-catalog";
 const MB = 1024 * 1024;
 const NO_CHILDREN: string[] = [];
+
+function shownSize(bytes: number | null | undefined, approx?: boolean) {
+  const text = formatSize(bytes);
+  if (!text) return "";
+  return approx ? `${text}+` : text;
+}
 
 function Icon({ node, className = "size-4 shrink-0" }: { node: Pick<FsNode, "kind" | "note"> & { name?: string }; className?: string }) {
   if (node.kind === "computer") return <Monitor className={className} />;
@@ -263,6 +270,7 @@ function FlagSelect() {
 function TabRow() {
   const tab = useFiles((s) => s.tab);
   const reading = useFiles((s) => s.reading);
+  const dark = useFiles((s) => s.dark);
   const [menu, setMenu] = useState(false);
   const [sub, setSub] = useState(false);
   const tabs: Array<[RibbonTab, string]> = [
@@ -315,7 +323,8 @@ function TabRow() {
               <button type="button" className="block min-h-11 w-full px-3 text-left text-sm hover:bg-select" onClick={() => { useFiles.getState().toggleTransfers(); setMenu(false); }}>Queue</button>
               <button type="button" className="block min-h-11 w-full px-3 text-left text-sm hover:bg-select" onClick={() => { useFiles.getState().toggleLog(); setMenu(false); }}>Activity</button>
               <button type="button" className="block min-h-11 w-full px-3 text-left text-sm hover:bg-select" onClick={() => { useFiles.getState().openDialog({ kind: "goto" }); setMenu(false); }}>Jump to path</button>
-              <button type="button" className="block min-h-11 w-full px-3 text-left text-sm hover:bg-select" onClick={() => { go("resources"); setMenu(false); }}>How it works</button>
+              <button type="button" className="block min-h-11 w-full px-3 text-left text-sm hover:bg-select" onClick={() => { useFiles.getState().setOptions({ dark: !dark }); setMenu(false); }}>{dark ? "Light mode" : "Dark mode"}</button>
+              <button type="button" className="block min-h-11 w-full px-3 text-left text-sm hover:bg-select" onClick={() => { go("resources"); setMenu(false); }}>Help</button>
             </div>
           </>
         )}
@@ -325,7 +334,7 @@ function TabRow() {
           key={id}
           type="button"
           onClick={() => go(id)}
-          className={"shrink-0 px-3 py-1.5 text-sm " + (tab === id ? "bg-ribbon font-semibold text-ink" : "text-tab-ink hover:bg-ink")}
+          className={"shrink-0 px-3 py-1.5 text-sm " + (tab === id ? "bg-ribbon font-semibold text-ink" : "text-tab-ink hover:bg-white/10")}
         >
           {label}
         </button>
@@ -619,13 +628,15 @@ function ToolsRibbon() {
 function OptionsRibbon() {
   const barMode = useFiles((s) => s.barMode);
   const calcDirs = useFiles((s) => s.calcDirs);
+  const dark = useFiles((s) => s.dark);
   const dateFormat = useFiles((s) => s.dateFormat);
   const timeFormat = useFiles((s) => s.timeFormat);
   const reading = useFiles((s) => s.reading);
   const set = useFiles.getState().setOptions;
   return (
     <div className="flex items-stretch gap-1 overflow-x-auto px-1 py-1">
-      <GroupBox title="Text">
+      <GroupBox title="Look">
+        <RibbonButton label={dark ? "Light" : "Dark"} icon={<Moon className="size-4" />} active={dark} onClick={() => set({ dark: !dark })} />
         <RibbonButton label="Larger text" icon={<FileText className="size-4" />} active={reading} onClick={() => set({ reading: !reading })} />
       </GroupBox>
       <GroupBox title="Bars">
@@ -973,11 +984,11 @@ function PaneView({ index }: { index: 0 | 1 }) {
                         </span>
                       </span>
                     </td>
-                    <td className="overflow-hidden px-2 py-1" style={columnBox(cols.size)} title={formatSize(row.bytes) || "Not measured"}>
-                      <span className="block truncate tabular-nums">{formatSize(row.bytes)}</span>
+                    <td className="overflow-hidden px-2 py-1" style={columnBox(cols.size)} title={shownSize(row.bytes, row.approx) || "Not measured"}>
+                      <span className="block truncate tabular-nums">{shownSize(row.bytes, row.approx)}</span>
                     </td>
                     <td className="overflow-hidden px-2 py-1" style={columnBox(cols.viz)}>
-                      <div className="h-3 w-full overflow-hidden bg-bar-track" title={row.bytes == null ? "Not measured" : formatSize(row.bytes)}>
+                      <div className="h-3 w-full overflow-hidden bg-bar-track" title={shownSize(row.bytes, row.approx) || "Not measured"}>
                         {pct > 0 && <div className="h-full bg-bar" style={{ width: `${pct}%` }} />}
                       </div>
                     </td>
@@ -1098,7 +1109,7 @@ function DetailsStrip({ index, compact = false, className = "" }: { index: 0 | 1
         </button>
       </div>
       <div className="flex flex-wrap gap-x-3">
-        <span className="tabular-nums">{formatSize(node.bytes) || "Not measured"}</span>
+        <span className="tabular-nums">{shownSize(node.bytes, node.approx) || "Not measured"}</span>
         <span className="text-muted">{flags}</span>
       </div>
       <div className="break-all text-muted" title={place}>{place}</div>
@@ -1796,7 +1807,7 @@ function Props({ id }: { id: string }) {
     ["Name", node.name],
     ["Type", typeLabel(node)],
     ["Location", displayPath(snap, id)],
-    ["Size", formatSize(node.bytes) || "Not measured"],
+    ["Size", shownSize(node.bytes, node.approx) || "Not measured"],
     ["Contains", node.kind === "file" ? "—" : `${kids} direct items`],
     ["Modified", formatDate(node.modified)],
     ["Flags", [node.hidden && "Hidden", node.readonly && "Read-only", node.system && "System"].filter(Boolean).join(", ") || "Normal"],
@@ -2020,6 +2031,10 @@ function NotePane({ id }: { id: string }) {
 
 export function FileManager() {
   const split = useFiles((s) => s.split);
+  const dark = useFiles((s) => s.dark);
+  useEffect(() => {
+    document.documentElement.classList.toggle("dark", dark);
+  }, [dark]);
   useEffect(() => {
     try {
       const raw = localStorage.getItem(UI_KEY);
@@ -2050,6 +2065,7 @@ export function FileManager() {
         dupes: state.dupes,
         barMode: state.barMode,
         calcDirs: state.calcDirs,
+        dark: state.dark,
         dateFormat: state.dateFormat,
         timeFormat: state.timeFormat,
         reading: state.reading,

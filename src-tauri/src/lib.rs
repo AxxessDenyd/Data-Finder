@@ -19,6 +19,7 @@ struct DiskEntry {
 struct Measured {
     name: String,
     bytes: Option<u64>,
+    partial: bool,
 }
 
 fn modified_ms(meta: &fs::Metadata) -> u64 {
@@ -205,26 +206,38 @@ async fn move_item(from: String, parent: String, name: String) -> Result<(), Str
         .map_err(|err| err.to_string())?
 }
 
-fn dir_size(path: &Path, budget: &mut u32) -> Option<u64> {
-    if *budget == 0 {
-        return None;
+fn dir_size(path: &Path, budget: &mut u32, depth: u32) -> (u64, bool) {
+    if *budget == 0 || depth > 48 {
+        return (0, false);
     }
     *budget -= 1;
-    let meta = fs::symlink_metadata(path).ok()?;
+    let Ok(meta) = fs::symlink_metadata(path) else {
+        return (0, false);
+    };
     if meta.file_type().is_symlink() || !meta.is_dir() {
-        return Some(meta.len());
+        return (meta.len(), true);
     }
+    let Ok(entries) = fs::read_dir(path) else {
+        return (0, false);
+    };
     let mut total = 0u64;
-    for entry in fs::read_dir(path).ok()?.flatten() {
-        total = total.saturating_add(dir_size(&entry.path(), budget)?);
+    let mut complete = true;
+    for entry in entries.flatten() {
+        let (bytes, child_ok) = dir_size(&entry.path(), budget, depth + 1);
+        total = total.saturating_add(bytes);
+        if !child_ok {
+            complete = false;
+            if *budget == 0 {
+                break;
+            }
+        }
     }
-    Some(total)
+    (total, complete)
 }
 
 #[tauri::command]
 async fn measure_children(path: String) -> Result<Vec<Measured>, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let mut budget = 20_000u32;
         let mut out = Vec::new();
         for entry in fs::read_dir(&path).map_err(|err| err.to_string())?.flatten() {
             let meta = match fs::symlink_metadata(entry.path()) {
@@ -234,9 +247,13 @@ async fn measure_children(path: String) -> Result<Vec<Measured>, String> {
             if !(meta.is_dir() && !meta.file_type().is_symlink()) {
                 continue;
             }
+            let mut budget = 25_000u32;
+            let (bytes, complete) = dir_size(&entry.path(), &mut budget, 0);
+            let partial = !complete;
             out.push(Measured {
                 name: entry.file_name().to_string_lossy().to_string(),
-                bytes: dir_size(&entry.path(), &mut budget),
+                bytes: if bytes == 0 && partial { None } else { Some(bytes) },
+                partial,
             });
         }
         Ok(out)

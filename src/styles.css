@@ -28,6 +28,33 @@
   --radius-sm: 2px;
 }
 
+.dark {
+  --color-app: #16181c;
+  --color-ink: #e8eaed;
+  --color-tab: #0c0e11;
+  --color-tab-ink: #d7dbe2;
+  --color-muted: #a3a9b3;
+  --color-line: #353a42;
+  --color-ribbon: #22262c;
+  --color-ribbon-edge: #353a42;
+  --color-pane: #1c2026;
+  --color-tree: #181b20;
+  --color-accent: #3d8fd4;
+  --color-accent-ink: #ffffff;
+  --color-select: #1d3f5e;
+  --color-select-edge: #3d8fd4;
+  --color-bar: #3d8fd4;
+  --color-bar-track: #2c323a;
+  --color-free: #3d9a46;
+  --color-header: #262b33;
+  --color-status: #1a1e24;
+  --color-danger: #e27878;
+  --color-folder: #e0b04a;
+  --color-diff: #1a3348;
+  --color-scrim: rgb(0 0 0 / 0.55);
+  color-scheme: dark;
+}
+
 @layer base {
   html,
   body,
@@ -49,6 +76,12 @@
   button:disabled {
     cursor: default;
     opacity: 0.45;
+  }
+  input:not([type="checkbox"]):not([type="radio"]),
+  select,
+  textarea {
+    background: var(--color-pane);
+    color: var(--color-ink);
   }
 }
 

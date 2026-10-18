@@ -192,6 +192,7 @@ export interface ListRow {
   readonly: boolean;
   system: boolean;
   kind: FsNode["kind"];
+  approx?: boolean;
   nodeId?: string;
   path?: string;
   note?: string;
@@ -213,6 +214,7 @@ interface FileState extends FsSnapshot {
   dupes: boolean;
   barMode: BarMode;
   calcDirs: boolean;
+  dark: boolean;
   dateFormat: DateFormat;
   timeFormat: TimeFormat;
   reading: boolean;
@@ -313,6 +315,7 @@ export interface UiPrefs {
   dupes?: boolean;
   barMode?: BarMode;
   calcDirs?: boolean;
+  dark?: boolean;
   dateFormat?: DateFormat;
   timeFormat?: TimeFormat;
   reading?: boolean;
@@ -345,7 +348,7 @@ interface Actions {
   toggleHidden: () => void;
   setFilters: (patch: Partial<Filters>) => void;
   clearFilters: () => void;
-  setOptions: (patch: Partial<Pick<FileState, "calcDirs" | "dateFormat" | "timeFormat" | "reading" | "barMode" | "detailsOpen">>) => void;
+  setOptions: (patch: Partial<Pick<FileState, "calcDirs" | "dark" | "dateFormat" | "timeFormat" | "reading" | "barMode" | "detailsOpen">>) => void;
   setColumn: (key: keyof ColumnWidths, width: number) => void;
   setDetailSize: (patch: { height?: number; width?: number }) => void;
   navigate: (index: 0 | 1, id: string, push?: boolean) => void;
@@ -578,6 +581,29 @@ function dropLoaded(nodes: Record<string, FsNode>, order: Record<string, string[
   return { nodes: nextNodes, order: nextOrder };
 }
 
+const measureGen = new Map<string, number>();
+
+function nextMeasure(folder: string) {
+  const token = (measureGen.get(folder) ?? 0) + 1;
+  measureGen.set(folder, token);
+  return token;
+}
+
+function measureStill(folder: string, token: number) {
+  return measureGen.get(folder) === token;
+}
+
+function savedDark() {
+  if (typeof localStorage === "undefined") return false;
+  try {
+    const raw = localStorage.getItem("data-finder-ui");
+    if (!raw) return false;
+    return Boolean((JSON.parse(raw) as { dark?: boolean }).dark);
+  } catch {
+    return false;
+  }
+}
+
 async function reloadDiskFolder(id: string) {
   const listed = await loadChildren(id);
   if (!listed) throw new Error("Could not read that folder");
@@ -602,6 +628,7 @@ export const useFiles = create<FileState & Actions>((set, get) => ({
   dupes: false,
   barMode: "linear",
   calcDirs: true,
+  dark: savedDark(),
   dateFormat: "mdy",
   timeFormat: "12",
   reading: false,
@@ -658,7 +685,13 @@ export const useFiles = create<FileState & Actions>((set, get) => ({
       panes: state.panes.map((item) => ({ ...item, query: "" })) as [PaneModel, PaneModel],
       status: "Filters cleared",
     })),
-  setOptions: (patch) => set(patch),
+  setOptions: (patch) => {
+    set(patch);
+    if (patch.calcDirs) {
+      get().calcSizes(0);
+      if (get().split) get().calcSizes(1);
+    }
+  },
   setColumn: (key, width) =>
     set((state) => ({ columns: { ...state.columns, [key]: clampColumn(key, width) } })),
   setDetailSize: (patch) =>
@@ -711,7 +744,7 @@ export const useFiles = create<FileState & Actions>((set, get) => ({
         status: displayPath(state, id),
       };
     });
-    if (get().calcDirs && !isDiskId(id)) void get().calcSizes(index);
+    if (get().calcDirs) void get().calcSizes(index);
   },
 
   goUp: (index) => {
@@ -740,7 +773,7 @@ export const useFiles = create<FileState & Actions>((set, get) => ({
       };
       return { panes, active: i, recent: remember(state.recent, target), status: displayPath(state, target) };
     });
-    if (get().calcDirs && !isDiskId(get().panes[i].pathId)) void get().calcSizes(i);
+    if (get().calcDirs) void get().calcSizes(i);
   },
 
   goForward: (index) => {
@@ -762,7 +795,7 @@ export const useFiles = create<FileState & Actions>((set, get) => ({
       };
       return { panes, active: i, recent: remember(state.recent, target), status: displayPath(state, target) };
     });
-    if (get().calcDirs && !isDiskId(get().panes[i].pathId)) void get().calcSizes(i);
+    if (get().calcDirs) void get().calcSizes(i);
   },
 
   refresh: (index) => {
@@ -770,7 +803,10 @@ export const useFiles = create<FileState & Actions>((set, get) => ({
     const id = get().panes[i].pathId;
     if (isDiskId(id)) {
       void reloadDiskFolder(id)
-        .then(() => set({ status: `Refreshed ${get().nodes[id]?.name ?? "folder"}` }))
+        .then(() => {
+          if (get().calcDirs) get().calcSizes(i);
+          else set({ status: `Refreshed ${get().nodes[id]?.name ?? "folder"}` });
+        })
         .catch((error: unknown) => set({ status: error instanceof Error ? error.message : "Could not refresh" }));
       return;
     }
@@ -1379,10 +1415,13 @@ export const useFiles = create<FileState & Actions>((set, get) => ({
     const state = get();
     const i = index ?? state.active;
     const folder = state.panes[i].pathId;
+    if (!state.calcDirs) return;
     if (isDiskId(folder)) {
+      const token = nextMeasure(folder);
       set({ measuring: true, status: "Measuring folders" });
       void measureChildren(folder)
         .then((sizes) => {
+          if (!measureStill(folder, token)) return;
           set((current) => {
             const nodes = { ...current.nodes };
             let sum = 0;
@@ -1395,22 +1434,27 @@ export const useFiles = create<FileState & Actions>((set, get) => ({
                 continue;
               }
               const measured = sizes[node.name.toLowerCase()];
-              if (measured == null) {
+              if (!measured) {
                 complete = false;
                 continue;
               }
-              nodes[id] = { ...node, bytes: measured };
-              sum += measured;
+              nodes[id] = { ...node, bytes: measured.bytes, approx: measured.partial };
+              sum += measured.bytes;
+              if (measured.partial) complete = false;
             }
-            if (complete && nodes[folder] && nodes[folder].kind !== "computer") nodes[folder] = { ...nodes[folder], bytes: sum };
+            if (nodes[folder] && nodes[folder].kind !== "computer") nodes[folder] = { ...nodes[folder], bytes: sum, approx: !complete };
+            const stillHere = current.panes.some((pane) => pane.pathId === folder);
             return {
               nodes,
               measuring: false,
-              status: `Folder sizes updated · ${displayPath(current, folder)}`,
+              status: stillHere
+                ? `${complete ? "Folder sizes updated" : "Folder sizes updated, largest ones are partial"} · ${displayPath(current, folder)}`
+                : current.status,
             };
           });
         })
         .catch((error: unknown) => {
+          if (!measureStill(folder, token)) return;
           set({ measuring: false, status: error instanceof Error ? error.message : "Could not measure those folders" });
         });
       return;
@@ -1970,6 +2014,7 @@ export const useFiles = create<FileState & Actions>((set, get) => ({
         dupes: prefs.dupes ?? state.dupes,
         barMode: prefs.barMode ?? state.barMode,
         calcDirs: prefs.calcDirs ?? state.calcDirs,
+        dark: prefs.dark ?? state.dark,
         dateFormat: prefs.dateFormat ?? state.dateFormat,
         timeFormat: prefs.timeFormat ?? state.timeFormat,
         reading: prefs.reading ?? state.reading,
@@ -2181,6 +2226,7 @@ export function listing(state: FileState, index: 0 | 1): { rows: ListRow[]; bann
       nodeId: node.id,
       name: node.name,
       bytes: !state.calcDirs && node.kind !== "file" ? null : node.bytes,
+      approx: state.calcDirs ? node.approx : undefined,
       modified: node.modified,
       hidden: node.hidden,
       readonly: node.readonly,
@@ -2200,6 +2246,7 @@ export function listing(state: FileState, index: 0 | 1): { rows: ListRow[]; bann
         nodeId: node.id,
         name: node.name,
         bytes: !state.calcDirs && node.kind !== "file" ? null : node.bytes,
+      approx: state.calcDirs ? node.approx : undefined,
         modified: node.modified,
         hidden: node.hidden,
         readonly: node.readonly,

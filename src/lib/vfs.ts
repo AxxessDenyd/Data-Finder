@@ -14,6 +14,8 @@ export interface FsNode {
   capacity?: number;
   free?: number;
   note?: string;
+  /** True when a real-disk folder walk stopped early. The size is a minimum. */
+  approx?: boolean;
 }
 
 export interface FsSnapshot {
