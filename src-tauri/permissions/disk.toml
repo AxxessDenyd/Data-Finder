@@ -1,0 +1,14 @@
+[[permission]]
+identifier = "allow-disk"
+description = "Read and change files on this computer"
+commands.allow = [
+  "drives",
+  "list_dir",
+  "create_item",
+  "rename_path",
+  "remove_path",
+  "read_text",
+  "copy_item",
+  "move_item",
+  "measure_children",
+]

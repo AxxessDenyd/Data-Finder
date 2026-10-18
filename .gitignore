@@ -1,0 +1,14 @@
+node_modules/
+src-tauri/target/
+desktop-dist/
+dist/
+.grok/
+attachments/
+artifacts/
+screenshots/
+.vercel/
+*.log
+.project_id
+.github_repo
+.env
+.env.*

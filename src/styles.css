@@ -1,0 +1,60 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Segoe UI", "Source Sans 3", "Segoe UI Variable", sans-serif;
+  --color-app: #ececec;
+  --color-ink: #1c1c1c;
+  --color-tab: #141414;
+  --color-tab-ink: #f3f3f3;
+  --color-muted: #5e5e5e;
+  --color-line: #c8c8c8;
+  --color-ribbon: #f6f6f6;
+  --color-ribbon-edge: #d6d6d6;
+  --color-pane: #ffffff;
+  --color-tree: #fafafa;
+  --color-accent: #1a6fb5;
+  --color-accent-ink: #ffffff;
+  --color-select: #cce4f7;
+  --color-select-edge: #7eb6dc;
+  --color-bar: #1a6fb5;
+  --color-bar-track: #e6e6e6;
+  --color-free: #2f7d32;
+  --color-header: #f3f3f3;
+  --color-status: #f0f0f0;
+  --color-danger: #a12626;
+  --color-folder: #c48a12;
+  --color-diff: #e3f0fa;
+  --color-scrim: rgb(28 28 28 / 0.4);
+  --radius-sm: 2px;
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    margin: 0;
+    background: var(--color-app);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-size: 13px;
+    line-height: 1.45;
+  }
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+  button:disabled {
+    cursor: default;
+    opacity: 0.45;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+    animation: none !important;
+  }
+}

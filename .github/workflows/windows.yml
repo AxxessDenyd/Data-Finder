@@ -1,0 +1,39 @@
+name: Windows program
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+      - name: Install dependencies
+        run: npm ci
+      - name: Build setup and program
+        run: npx --yes @tauri-apps/cli@2.12.3 build
+      - name: Collect the two files
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "$PWD/windows-out" | Out-Null
+          $setup = Get-ChildItem -Path "src-tauri/target/release/bundle/nsis" -Filter "*setup.exe" | Select-Object -First 1
+          if (-not $setup) { throw "Setup file was not created" }
+          Copy-Item $setup.FullName "$PWD/windows-out/Data Finder Setup.exe"
+          $portable = Get-ChildItem -Path "src-tauri/target/release" -Filter "*.exe" | Where-Object { $_.Name -notlike "*setup*" } | Select-Object -First 1
+          if (-not $portable) { throw "Program was not created" }
+          Copy-Item $portable.FullName "$PWD/windows-out/Data Finder.exe"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Data-Finder-Windows
+          path: windows-out/*
+          if-no-files-found: error
