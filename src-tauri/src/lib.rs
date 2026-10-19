@@ -17,6 +17,7 @@ struct DiskEntry {
     capacity: Option<u64>,
     free: Option<u64>,
     media: String,
+    label: String,
 }
 
 #[derive(Serialize)]
@@ -67,6 +68,7 @@ fn push_entry(out: &mut Vec<DiskEntry>, name: String, path: PathBuf, meta: &fs::
         capacity: None,
         free: None,
         media: String::new(),
+        label: String::new(),
     });
 }
 
@@ -92,7 +94,8 @@ fn drives() -> Vec<DiskEntry> {
                 mounted: true,
                 capacity: None,
                 free: None,
-                media: "Local".into(),
+                media: "Local Disk".into(),
+                label: String::new(),
             });
         }
         out
@@ -198,18 +201,6 @@ mod winvol {
 }
 
 #[cfg(windows)]
-fn media_name(kind: u32) -> &'static str {
-    match kind {
-        winvol::DRIVE_REMOVABLE => "Removable",
-        winvol::DRIVE_FIXED => "Local",
-        winvol::DRIVE_REMOTE => "Network",
-        winvol::DRIVE_CDROM => "Optical",
-        winvol::DRIVE_RAMDISK => "RAM",
-        _ => "Unknown",
-    }
-}
-
-#[cfg(windows)]
 fn volume_label(root: &str) -> String {
     let mut name = [0u16; 64];
     let ok = unsafe {
@@ -257,8 +248,15 @@ fn windows_drives() -> Vec<DiskEntry> {
         let mut caller_free = 0u64;
         let mut total = 0u64;
         let ready = unsafe { winvol::GetDiskFreeSpaceExW(wide(&root).as_ptr(), &mut caller_free, &mut total, std::ptr::null_mut()) } != 0;
-        let label = if ready { volume_label(&root) } else { String::new() };
-        let media = media_name(kind);
+        let label = volume_label(&root);
+        let media = match kind {
+            winvol::DRIVE_REMOVABLE => "Removable Disk",
+            winvol::DRIVE_FIXED => "Local Disk",
+            winvol::DRIVE_REMOTE => "Network Drive",
+            winvol::DRIVE_CDROM => "Optical Drive",
+            winvol::DRIVE_RAMDISK => "RAM Disk",
+            _ => "Disk",
+        };
         out.push(DiskEntry {
             name: format!("{letter}:"),
             path: root,
@@ -271,7 +269,8 @@ fn windows_drives() -> Vec<DiskEntry> {
             mounted: ready,
             capacity: if ready { Some(total) } else { None },
             free: if ready { Some(caller_free) } else { None },
-            media: if label.is_empty() { media.into() } else { format!("{media} · {label}") },
+            media: media.into(),
+            label,
         });
     }
 
@@ -291,7 +290,7 @@ fn windows_drives() -> Vec<DiskEntry> {
             if !mounted_somewhere && err != winvol::ERROR_MORE_DATA {
                 let label = volume_label(&vol);
                 out.push(DiskEntry {
-                    name: if label.is_empty() { format!("Disk {disks}") } else { label },
+                    name: format!("Disk {disks}"),
                     path: vol,
                     kind: "drive".into(),
                     bytes: None,
@@ -302,7 +301,8 @@ fn windows_drives() -> Vec<DiskEntry> {
                     mounted: false,
                     capacity: None,
                     free: None,
-                    media: "No letter".into(),
+                    media: "Disk".into(),
+                    label,
                 });
                 disks += 1;
             }

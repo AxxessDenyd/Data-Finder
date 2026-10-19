@@ -85,6 +85,7 @@ type RawEntry = {
   capacity?: number | null;
   free?: number | null;
   media?: string;
+  label?: string;
 };
 
 async function invoke<T>(command: string, args?: Record<string, unknown>): Promise<T> {
@@ -108,6 +109,7 @@ function makeNode(id: string, parentId: string | null, entry: RawEntry): FsNode 
     capacity: entry.capacity ?? undefined,
     free: entry.free ?? undefined,
     note: entry.media || undefined,
+    label: entry.label || undefined,
   };
 }
 

@@ -68,7 +68,7 @@ import {
   type UiPrefs,
   type Visibility,
 } from "@/lib/file-store";
-import { childrenOf, formatDate, formatSize, pathIds, resolvePath, typeLabel, type FsNode } from "@/lib/vfs";
+import { childrenOf, driveCaption, formatDate, formatSize, pathIds, resolvePath, typeLabel, type FsNode } from "@/lib/vfs";
 import { isDesktop, isDiskId, withoutDisk } from "@/lib/disk";
 
 const UI_KEY = "data-finder-ui";
@@ -741,7 +741,7 @@ function TreeBranch({ id, depth, pane }: { id: string; depth: number; pane: 0 | 
     .map((cid) => nodes[cid])
     .filter((item) => item && item.kind !== "file" && flagVisible(item, visibility));
   const here = pathId === id;
-  const label = node.kind === "drive" ? `${node.name}\\ · ${node.mounted === false ? "Not mounted" : "Mounted"}` : node.name;
+  const label = node.kind === "drive" ? `${driveCaption(node)} · ${node.mounted === false ? "Not mounted" : "Mounted"}` : node.name;
   return (
     <div>
       <button
@@ -850,7 +850,7 @@ function PaneView({ index }: { index: 0 | 1 }) {
             {chain.map((id, i) => {
               const node = nodes[id];
               if (!node) return null;
-              const label = node.kind === "drive" ? `${node.name}\\` : node.name;
+              const label = node.kind === "drive" ? driveCaption(node) : node.name;
               return (
                 <span key={id} className="flex shrink-0 items-center gap-1">
                   {i > 0 && <ChevronRight className="size-3 text-muted" />}
@@ -982,7 +982,9 @@ function PaneView({ index }: { index: 0 | 1 }) {
                       <span className="flex items-center gap-2">
                         <Icon node={{ kind: row.kind, name: row.name, note: row.note }} />
                         <span className="min-w-0 flex-1">
-                          <span className="block truncate" title={row.name}>{row.name}</span>
+                          <span className="block truncate" title={row.kind === "drive" && row.nodeId && nodes[row.nodeId] ? driveCaption(nodes[row.nodeId]) : row.name}>
+                            {row.kind === "drive" && row.nodeId && nodes[row.nodeId] ? driveCaption(nodes[row.nodeId]) : row.name}
+                          </span>
                           {row.path && <span className="block truncate text-xs text-muted" title={row.path}>{row.path}</span>}
                           {row.onlyHere && <span className="text-xs text-accent">Missing opposite</span>}
                           {row.dupe && <span className="text-xs text-accent">Twin size</span>}
@@ -1043,7 +1045,7 @@ function PaneView({ index }: { index: 0 | 1 }) {
         {drive && (
           <span className="flex shrink-0 items-center gap-2">
             <span className="tabular-nums">
-              {drive.name}\ {drive.mounted === false ? "Not mounted" : `Mounted${drive.capacity ? ` · ${formatSize(drive.capacity)} (${freePct}% Free)` : ""}`}
+              {drive.name.endsWith(":") ? driveCaption(drive) : drive.name}\ {drive.mounted === false ? "Not mounted" : `Mounted${drive.capacity ? ` · ${formatSize(drive.capacity)} (${freePct}% Free)` : ""}`}
             </span>
             {drive.mounted !== false && !!drive.capacity && (
               <span className="h-3 w-28 overflow-hidden border border-line bg-pane">
@@ -1107,7 +1109,7 @@ function DetailsStrip({ index, compact = false, className = "" }: { index: 0 | 1
         <span className={compact ? "absolute inset-x-2 top-1/2 h-px bg-line" : "absolute inset-y-2 left-1/2 w-px bg-line"} />
       </span>
       <div className="flex items-start gap-1">
-        <div className="min-w-0 flex-1 truncate font-semibold" title={node.name}>{node.name}{extra}</div>
+        <div className="min-w-0 flex-1 truncate font-semibold" title={node.kind === "drive" ? driveCaption(node) : node.name}>{node.kind === "drive" ? driveCaption(node) : node.name}{extra}</div>
         <button
           type="button"
           aria-label="Close details"
@@ -1560,7 +1562,7 @@ function Dialogs() {
         )}
         {dialog.kind === "unmount" && nodes[dialog.id] && (
           <div>
-            <h2 className="text-base font-semibold">Unmount {nodes[dialog.id].name}?</h2>
+            <h2 className="text-base font-semibold">Unmount {driveCaption(nodes[dialog.id]) }?</h2>
             <p className="mt-2 text-sm text-muted">
               {nodes[dialog.id].system
                 ? "Windows is running from this drive, so it stays mounted."
@@ -1829,7 +1831,7 @@ function Props({ id }: { id: string }) {
   const snap = { nodes, order };
   const kids = node.kind === "file" ? 0 : childrenOf(snap, id).length;
   const rows: Array<[string, string]> = [
-    ["Name", node.name],
+    ["Name", node.kind === "drive" ? driveCaption(node) : node.name],
     ["Type", typeLabel(node)],
     ["Location", displayPath(snap, id)],
     ["Size", shownSize(node.bytes, node.approx) || "Not measured"],

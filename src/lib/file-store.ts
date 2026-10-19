@@ -1971,6 +1971,7 @@ export const useFiles = create<FileState & Actions>((set, get) => ({
             capacity: match.capacity,
             free: match.free,
             note: match.note,
+            label: match.label,
             system: match.system,
           };
           kept.push(oldId);

@@ -18,6 +18,8 @@ export interface FsNode {
   approx?: boolean;
   /** False when a drive has no media or no mount point. */
   mounted?: boolean;
+  /** Volume name, such as Windows. The drive letter stays in name. */
+  label?: string;
 }
 
 export interface FsSnapshot {
@@ -60,10 +62,19 @@ export function formatDate(ts: number): string {
   });
 }
 
+export function driveCaption(node: FsNode): string {
+  const letter = node.name;
+  const label = node.label?.trim();
+  if (label && letter.endsWith(":")) return `${label} (${letter})`;
+  if (letter.endsWith(":") && node.note) return `${node.note} (${letter})`;
+  if (label) return `${label} (${letter})`;
+  return letter;
+}
+
 export function typeLabel(node: FsNode): string {
   if (node.kind === "drive") {
     const mount = node.mounted === false ? "Not mounted" : "Mounted";
-    return node.note ? `${mount} · ${node.note}` : mount;
+    return `${mount} · ${node.note || "Disk"}`;
   }
   if (node.kind === "dir") return "File Folder";
   if (node.kind === "computer") return "Computer";
@@ -98,6 +109,7 @@ export function createSeed(): FsSnapshot {
       free: extra.free,
       note: extra.note,
       mounted: extra.mounted,
+      label: extra.label,
     };
     if (parentId) {
       (order[parentId] ??= []).push(id);
