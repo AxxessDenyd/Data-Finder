@@ -138,10 +138,11 @@ export type Visibility =
 
 export interface Filters {
   showHidden: boolean;
+  showReadonly: boolean;
+  showSystem: boolean;
   kind: "all" | "dir" | "file";
   ext: string;
   attr: "any" | "h" | "r" | "s";
-  visibility: Visibility;
   minBytes: number;
   findColumn: FindColumn;
   exclude: string;
@@ -149,17 +150,13 @@ export interface Filters {
   group: FilterGroup;
 }
 
-export function flagVisible(node: { hidden?: boolean; readonly?: boolean; system?: boolean }, visibility: Visibility) {
-  const hidden = Boolean(node.hidden);
-  const readonly = Boolean(node.readonly);
-  const system = Boolean(node.system);
-  if (visibility === "only-hidden") return hidden;
-  if (visibility === "only-readonly") return readonly;
-  if (visibility === "only-system") return system;
-  if (visibility === "hide-hidden") return !hidden;
-  if (visibility === "hide-readonly") return !readonly;
-  if (visibility === "hide-system") return !system;
-  if (visibility === "hide-marked") return !hidden && !system;
+export function flagVisible(
+  node: { hidden?: boolean; readonly?: boolean; system?: boolean },
+  flags: { showHidden?: boolean; showReadonly?: boolean; showSystem?: boolean },
+) {
+  if (node.hidden && flags.showHidden === false) return false;
+  if (node.readonly && flags.showReadonly === false) return false;
+  if (node.system && flags.showSystem === false) return false;
   return true;
 }
 
@@ -254,10 +251,11 @@ interface FileState extends FsSnapshot {
 
 const defaultFilters: Filters = {
   showHidden: true,
+  showReadonly: true,
+  showSystem: true,
   kind: "all",
   ext: "",
   attr: "any",
-  visibility: "all",
   minBytes: 0,
   findColumn: "name",
   exclude: "",
@@ -2175,7 +2173,7 @@ export const useFiles = create<FileState & Actions>((set, get) => ({
       const order = catalog?.order ?? state.order;
       const seq = catalog?.seq ?? state.seq;
       return {
-        split: prefs.split ?? state.split,
+        split: false,
         diff: prefs.diff ?? state.diff,
         dupes: prefs.dupes ?? state.dupes,
         barMode: prefs.barMode ?? state.barMode,
@@ -2314,14 +2312,40 @@ function inGroup(name: string, kind: FsNode["kind"], group: FilterGroup) {
   return ["jpg", "jpeg", "png", "gif", "webp"].includes(ext);
 }
 
-function normalizeFilters(filters: Filters): Filters {
-  if (filters.visibility) return { ...defaultFilters, ...filters };
-  let visibility: Visibility = "all";
-  if (filters.attr === "h") visibility = "only-hidden";
-  else if (filters.attr === "r") visibility = "only-readonly";
-  else if (filters.attr === "s") visibility = "only-system";
-  else if (filters.showHidden === false) visibility = "hide-marked";
-  return { ...defaultFilters, ...filters, visibility, attr: "any", showHidden: true };
+function normalizeFilters(raw: Partial<Filters> & { visibility?: Visibility }): Filters {
+  let showHidden = raw.showHidden ?? true;
+  let showReadonly = raw.showReadonly ?? true;
+  let showSystem = raw.showSystem ?? true;
+  if (raw.visibility && raw.showReadonly == null && raw.showSystem == null) {
+    if (raw.visibility === "hide-hidden") showHidden = false;
+    if (raw.visibility === "hide-readonly") showReadonly = false;
+    if (raw.visibility === "hide-system") showSystem = false;
+    if (raw.visibility === "hide-marked") {
+      showHidden = false;
+      showSystem = false;
+    }
+    if (raw.visibility === "only-hidden") {
+      showHidden = true;
+      showReadonly = false;
+      showSystem = false;
+    }
+    if (raw.visibility === "only-readonly") {
+      showReadonly = true;
+      showHidden = false;
+      showSystem = false;
+    }
+    if (raw.visibility === "only-system") {
+      showSystem = true;
+      showHidden = false;
+      showReadonly = false;
+    }
+    if (raw.visibility === "all") {
+      showHidden = true;
+      showReadonly = true;
+      showSystem = true;
+    }
+  }
+  return { ...defaultFilters, ...raw, showHidden, showReadonly, showSystem, attr: "any" };
 }
 
 function passes(
@@ -2329,7 +2353,7 @@ function passes(
   filters: Filters,
   query: string,
 ) {
-  if (!flagVisible(row, filters.visibility ?? "all")) return false;
+  if (!flagVisible(row, filters)) return false;
   if (filters.kind === "dir" && row.kind === "file") return false;
   if (filters.kind === "file" && row.kind !== "file") return false;
   if (filters.ext) {

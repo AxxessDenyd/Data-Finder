@@ -66,7 +66,6 @@ import {
   type RibbonTab,
   type TimeFormat,
   type UiPrefs,
-  type Visibility,
 } from "@/lib/file-store";
 import { childrenOf, driveCaption, formatDate, formatSize, pathIds, resolvePath, typeLabel, type FsNode } from "@/lib/vfs";
 import { isDesktop, isDiskId, withoutDisk } from "@/lib/disk";
@@ -249,22 +248,22 @@ function LabeledSelect({ label, value, onChange, children }: { label: string; va
 }
 
 function FlagSelect() {
-  const visibility = useFiles((s) => s.filters.visibility);
+  const showHidden = useFiles((s) => s.filters.showHidden);
+  const showReadonly = useFiles((s) => s.filters.showReadonly);
+  const showSystem = useFiles((s) => s.filters.showSystem);
+  const set = useFiles.getState().setFilters;
+  const box = (label: string, checked: boolean, key: "showHidden" | "showReadonly" | "showSystem") => (
+    <label className="flex items-center gap-1 whitespace-nowrap">
+      <input type="checkbox" checked={checked} onChange={(e) => set({ [key]: e.target.checked })} />
+      {label}
+    </label>
+  );
   return (
-    <LabeledSelect
-      label="Flags"
-      value={visibility}
-      onChange={(value) => useFiles.getState().setFilters({ visibility: value as Visibility })}
-    >
-      <option value="all">Show all</option>
-      <option value="only-hidden">Only hidden</option>
-      <option value="only-readonly">Only read-only</option>
-      <option value="only-system">Only system</option>
-      <option value="hide-hidden">Hide hidden</option>
-      <option value="hide-readonly">Hide read-only</option>
-      <option value="hide-system">Hide system</option>
-      <option value="hide-marked">Hide hidden and system</option>
-    </LabeledSelect>
+    <div className="flex h-14 items-center gap-3 px-2 text-sm">
+      {box("Hidden", showHidden, "showHidden")}
+      {box("Read-only", showReadonly, "showReadonly")}
+      {box("System", showSystem, "showSystem")}
+    </div>
   );
 }
 
@@ -568,8 +567,8 @@ function InspectRibbon() {
           else if (value === "programs") apply({ group: "programs", kind: "file" });
           else if (value === "images") apply({ group: "images", kind: "file" });
           else if (value === "large") apply({ kind: "file", minBytes: 100 * MB });
-          else if (value === "hidden") apply({ visibility: "only-hidden" });
-          else if (value === "system") apply({ visibility: "only-system" });
+          else if (value === "hidden") apply({ showHidden: true, showReadonly: false, showSystem: false });
+          else if (value === "system") apply({ showSystem: true, showHidden: false, showReadonly: false });
         }}>
           <option value="">All items</option>
           <option value="folders">Folders</option>
@@ -733,7 +732,7 @@ function TreeBranch({ id, depth, pane }: { id: string; depth: number; pane: 0 | 
   const childIds = useFiles((s) => s.order[id]) ?? NO_CHILDREN;
   const nodes = useFiles((s) => s.nodes);
   const pathId = useFiles((s) => s.panes[pane].pathId);
-  const visibility = useFiles((s) => s.filters.visibility);
+  const filters = useFiles((s) => s.filters);
   const [open, setOpen] = useState(depth < 1 || id === "c");
   const inPath = pathIds({ nodes, order: {} }, pathId).includes(id);
   useEffect(() => {
@@ -742,7 +741,7 @@ function TreeBranch({ id, depth, pane }: { id: string; depth: number; pane: 0 | 
   if (!node) return null;
   const folders = childIds
     .map((cid) => nodes[cid])
-    .filter((item) => item && item.kind !== "file" && flagVisible(item, visibility));
+    .filter((item) => item && item.kind !== "file" && flagVisible(item, filters));
   const here = pathId === id;
   const label = node.kind === "drive" ? `${driveCaption(node)} · ${node.mounted === false ? "Not mounted" : "Mounted"}` : node.name;
   return (
