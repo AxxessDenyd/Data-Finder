@@ -154,21 +154,31 @@ function GroupBox({ title, children }: { title: string; children: ReactNode }) {
 }
 
 function SectionMenu({ label, children }: { label: string; children: ReactNode }) {
-  const [open, setOpen] = useState(false);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const [box, setBox] = useState<{ left: number; top: number } | null>(null);
   return (
-    <div className="relative">
+    <div>
       <button
+        ref={buttonRef}
         type="button"
-        className={"flex h-8 items-center gap-1 rounded-md px-2 text-[13px] " + (open ? "bg-select" : "hover:bg-header")}
-        onClick={() => setOpen((value) => !value)}
+        className={"flex h-8 items-center gap-1 rounded-md px-2 text-[13px] " + (box ? "bg-select" : "hover:bg-header")}
+        onClick={() => {
+          if (box) {
+            setBox(null);
+            return;
+          }
+          const rect = buttonRef.current?.getBoundingClientRect();
+          if (!rect) return;
+          setBox({ left: Math.max(8, Math.min(rect.left, window.innerWidth - 252)), top: rect.bottom + 4 });
+        }}
       >
         {label}
         <ChevronDown className="size-3.5 text-muted" />
       </button>
-      {open && (
+      {box && (
         <>
-          <button type="button" aria-label={`Close ${label}`} className="fixed inset-0 z-20 cursor-default" onClick={() => setOpen(false)} />
-          <div className="absolute top-full left-0 z-30 mt-1 w-60 rounded-lg border border-line bg-menu p-1 shadow-xl" onClick={() => setOpen(false)}>
+          <button type="button" aria-label={`Close ${label}`} className="fixed inset-0 z-40 cursor-default" onClick={() => setBox(null)} />
+          <div className="fixed z-50 max-h-[70vh] w-60 overflow-auto rounded-lg border border-line bg-menu p-1 shadow-xl" style={{ left: box.left, top: box.top }} onClick={() => setBox(null)}>
             {children}
           </div>
         </>
@@ -304,6 +314,10 @@ function ViewMenu() {
   const showSystem = useFiles((s) => s.filters.showSystem);
   const [open, setOpen] = useState(false);
   const [show, setShow] = useState(false);
+  const [box, setBox] = useState<{ left: number; top: number } | null>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const showRef = useRef<HTMLDivElement>(null);
+  const [showBox, setShowBox] = useState<{ left: number; top: number } | null>(null);
   const set = useFiles.getState().setOptions;
   const filters = useFiles.getState().setFilters;
   const row = (on: boolean, label: string, fn: () => void, icon?: ReactNode, nest?: boolean) => (
@@ -330,16 +344,31 @@ function ViewMenu() {
     ["content", "Content", <FileText className="size-4" />],
   ];
   return (
-    <div className="relative">
-      <button type="button" className={"flex h-8 items-center gap-1 rounded-md px-2 text-[13px] " + (open ? "bg-select" : "hover:bg-header")} onClick={() => { setOpen((v) => !v); setShow(false); }}>
+    <div>
+      <button
+        ref={buttonRef}
+        type="button"
+        className={"flex h-8 items-center gap-1 rounded-md px-2 text-[13px] " + (open ? "bg-select" : "hover:bg-header")}
+        onClick={() => {
+          if (open) {
+            setOpen(false);
+            setShow(false);
+            return;
+          }
+          const rect = buttonRef.current?.getBoundingClientRect();
+          if (!rect) return;
+          setBox({ left: Math.max(8, Math.min(rect.left, window.innerWidth - 272)), top: rect.bottom + 4 });
+          setOpen(true);
+        }}
+      >
         <List className="size-4" />
         View
         <ChevronDown className="size-3.5 text-muted" />
       </button>
-      {open && (
+      {open && box && (
         <>
-          <button type="button" aria-label="Close view menu" className="fixed inset-0 z-20 cursor-default" onClick={() => setOpen(false)} />
-          <div className="absolute top-full left-0 z-30 mt-1 w-64 rounded-lg border border-line bg-menu p-1 shadow-xl">
+          <button type="button" aria-label="Close view menu" className="fixed inset-0 z-40 cursor-default" onClick={() => { setOpen(false); setShow(false); }} />
+          <div className="fixed z-50 max-h-[70vh] w-64 overflow-auto rounded-lg border border-line bg-menu p-1 shadow-xl" style={{ left: box.left, top: box.top }}>
             {layouts.map(([id, label, icon]) => (
               <span key={id}>{row(viewMode === id, label, () => { set({ viewMode: id }); setOpen(false); }, icon)}</span>
             ))}
@@ -347,10 +376,18 @@ function ViewMenu() {
             {row(detailsOpen, "Details pane", () => set({ detailsOpen: !detailsOpen }), <PanelLeft className="size-4" />)}
             {row(previewOpen, "Preview pane", () => set({ previewOpen: !previewOpen }), <File className="size-4" />)}
             <div className="my-1 h-px bg-line" />
-            <div className="relative" onMouseEnter={() => setShow(true)}>
+            <div
+              ref={showRef}
+              className="relative"
+              onMouseEnter={() => {
+                const rect = showRef.current?.getBoundingClientRect();
+                if (rect) setShowBox({ left: Math.min(rect.right + 4, window.innerWidth - 248), top: rect.top });
+                setShow(true);
+              }}
+            >
               {row(false, "Show", () => setShow((v) => !v), <List className="size-4" />, true)}
-              {show && (
-                <div className="absolute top-0 left-full z-40 ml-1 w-60 rounded-lg border border-line bg-menu p-1 shadow-xl">
+              {show && showBox && (
+                <div className="fixed z-50 w-60 rounded-lg border border-line bg-menu p-1 shadow-xl" style={{ left: showBox.left, top: showBox.top }}>
                   {row(showNav, "Navigation pane", () => set({ showNav: !showNav }), <PanelLeft className="size-4" />)}
                   {row(compact, "Compact view", () => set({ compact: !compact }), <List className="size-4" />)}
                   {row(itemChecks, "Item check boxes", () => set({ itemChecks: !itemChecks }), <Check className="size-4" />)}
@@ -493,7 +530,7 @@ function HomeRibbon() {
   useEffect(() => setDesktop(isDesktop()), []);
 
   return (
-    <div className="flex items-center gap-1 overflow-x-auto px-2 py-1">
+    <div className="flex flex-wrap items-center gap-1 px-2 py-1">
       <SectionMenu label="Hold">
         <MenuAction label="Cut" disabled={!selected.length} icon={<Scissors className="size-4" />} onClick={() => store().cut()} />
         <MenuAction label="Copy" disabled={!selected.length} icon={<Copy className="size-4" />} onClick={() => store().copy()} />
