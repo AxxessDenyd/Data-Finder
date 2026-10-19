@@ -126,6 +126,8 @@ export interface PaneModel {
   flat: boolean;
 }
 
+export type ViewMode = "xlarge" | "large" | "medium" | "small" | "list" | "details" | "tiles" | "content";
+
 export type Visibility =
   | "all"
   | "only-hidden"
@@ -151,9 +153,10 @@ export interface Filters {
 }
 
 export function flagVisible(
-  node: { hidden?: boolean; readonly?: boolean; system?: boolean },
+  node: { hidden?: boolean; readonly?: boolean; system?: boolean; kind?: string },
   flags: { showHidden?: boolean; showReadonly?: boolean; showSystem?: boolean },
 ) {
+  if (node.kind === "drive" || node.kind === "computer") return true;
   if (node.hidden && flags.showHidden === false) return false;
   if (node.readonly && flags.showReadonly === false) return false;
   if (node.system && flags.showSystem === false) return false;
@@ -246,11 +249,18 @@ interface FileState extends FsSnapshot {
   detailHeight: number;
   detailWidth: number;
   detailsOpen: boolean;
+  viewMode: ViewMode;
+  showNav: boolean;
+  compact: boolean;
+  itemChecks: boolean;
+  showExt: boolean;
+  previewOpen: boolean;
+  uiRev: number;
   readerId: string | null;
 }
 
 const defaultFilters: Filters = {
-  showHidden: true,
+  showHidden: false,
   showReadonly: true,
   showSystem: true,
   kind: "all",
@@ -329,6 +339,13 @@ export interface UiPrefs {
   detailHeight?: number;
   detailWidth?: number;
   detailsOpen?: boolean;
+  viewMode?: ViewMode;
+  showNav?: boolean;
+  compact?: boolean;
+  itemChecks?: boolean;
+  showExt?: boolean;
+  previewOpen?: boolean;
+  uiRev?: number;
   sort?: [{ key: SortKey; dir: "asc" | "desc" }, { key: SortKey; dir: "asc" | "desc" }];
 }
 
@@ -348,7 +365,7 @@ interface Actions {
   toggleHidden: () => void;
   setFilters: (patch: Partial<Filters>) => void;
   clearFilters: () => void;
-  setOptions: (patch: Partial<Pick<FileState, "calcDirs" | "dark" | "dateFormat" | "timeFormat" | "reading" | "barMode" | "detailsOpen">>) => void;
+  setOptions: (patch: Partial<Pick<FileState, "calcDirs" | "dark" | "dateFormat" | "timeFormat" | "reading" | "barMode" | "detailsOpen" | "viewMode" | "showNav" | "compact" | "itemChecks" | "showExt" | "previewOpen">>) => void;
   setColumn: (key: keyof ColumnWidths, width: number) => void;
   setDetailSize: (patch: { height?: number; width?: number }) => void;
   navigate: (index: 0 | 1, id: string, push?: boolean) => void;
@@ -718,6 +735,13 @@ export const useFiles = create<FileState & Actions>((set, get) => ({
   detailHeight: 160,
   detailWidth: 224,
   detailsOpen: true,
+  viewMode: "details",
+  showNav: true,
+  compact: false,
+  itemChecks: false,
+  showExt: true,
+  previewOpen: false,
+  uiRev: 2,
   readerId: null,
 
   setActive: (index) => set({ active: index }),
@@ -2172,6 +2196,8 @@ export const useFiles = create<FileState & Actions>((set, get) => ({
       const nodes = catalog?.nodes ?? state.nodes;
       const order = catalog?.order ?? state.order;
       const seq = catalog?.seq ?? state.seq;
+      const filters = normalizeFilters({ ...state.filters, ...prefs.filters });
+      if ((prefs.uiRev ?? 0) < 2) filters.showHidden = false;
       return {
         split: false,
         diff: prefs.diff ?? state.diff,
@@ -2184,7 +2210,14 @@ export const useFiles = create<FileState & Actions>((set, get) => ({
         reading: prefs.reading ?? state.reading,
         favorites: (prefs.favorites ?? state.favorites).filter((id) => nodes[id]),
         recent: (prefs.recent ?? state.recent).filter((id) => nodes[id]),
-        filters: normalizeFilters({ ...state.filters, ...prefs.filters }),
+        filters,
+        viewMode: prefs.viewMode ?? state.viewMode,
+        showNav: prefs.showNav ?? state.showNav,
+        compact: prefs.compact ?? state.compact,
+        itemChecks: prefs.itemChecks ?? state.itemChecks,
+        showExt: prefs.showExt ?? state.showExt,
+        previewOpen: prefs.previewOpen ?? state.previewOpen,
+        uiRev: 2,
         nodes,
         order,
         seq,
@@ -2313,7 +2346,7 @@ function inGroup(name: string, kind: FsNode["kind"], group: FilterGroup) {
 }
 
 function normalizeFilters(raw: Partial<Filters> & { visibility?: Visibility }): Filters {
-  let showHidden = raw.showHidden ?? true;
+  let showHidden = raw.showHidden ?? false;
   let showReadonly = raw.showReadonly ?? true;
   let showSystem = raw.showSystem ?? true;
   if (raw.visibility && raw.showReadonly == null && raw.showSystem == null) {

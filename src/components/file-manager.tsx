@@ -4,6 +4,7 @@ import {
   AppWindow,
   ArrowLeftRight,
   ArrowUp,
+  Check,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -27,13 +28,16 @@ import {
   HardDrive,
   History,
   Image,
+  LayoutGrid,
   Link,
+  List,
   ListFilter,
   ListTree,
   Menu,
   Moon,
   Monitor,
   Music,
+  PanelLeft,
   Pencil,
   RefreshCw,
   RotateCcw,
@@ -66,6 +70,7 @@ import {
   type RibbonTab,
   type TimeFormat,
   type UiPrefs,
+  type ViewMode,
 } from "@/lib/file-store";
 import { childrenOf, driveCaption, formatDate, formatSize, pathIds, resolvePath, typeLabel, type FsNode } from "@/lib/vfs";
 import { isDesktop, isDiskId, withoutDisk } from "@/lib/disk";
@@ -81,26 +86,32 @@ function shownSize(bytes: number | null | undefined, approx?: boolean) {
   return approx ? `${text}+` : text;
 }
 
-function Icon({ node, className = "size-4 shrink-0" }: { node: Pick<FsNode, "kind" | "note"> & { name?: string }; className?: string }) {
-  if (node.kind === "computer") return <Monitor className={className} />;
-  if (node.kind === "drive") return <HardDrive className={className} />;
-  if (node.kind === "dir") return <Folder className={`${className} text-folder`} />;
-  const Glyph = glyphFor(node.name, node.note != null);
-  return <Glyph className={className} />;
+function shownName(name: string, kind: string, showExt: boolean) {
+  if (showExt || kind !== "file") return name;
+  const dot = name.lastIndexOf(".");
+  return dot > 0 ? name.slice(0, dot) : name;
 }
 
-function glyphFor(name: string | undefined, hasNote: boolean) {
+function Icon({ node, className = "size-4 shrink-0" }: { node: Pick<FsNode, "kind" | "note"> & { name?: string }; className?: string }) {
+  if (node.kind === "computer") return <Monitor className={`${className} text-accent`} />;
+  if (node.kind === "drive") return <HardDrive className={`${className} text-accent`} />;
+  if (node.kind === "dir") return <Folder className={`${className} fill-folder text-folder`} />;
+  const [Glyph, tint] = glyphFor(node.name, node.note != null);
+  return <Glyph className={`${className} ${tint}`} />;
+}
+
+function glyphFor(name: string | undefined, hasNote: boolean): [typeof File, string] {
   const dot = name?.lastIndexOf(".") ?? -1;
   const ext = dot > 0 ? name!.slice(dot + 1).toLowerCase() : "";
-  if (["png", "jpg", "jpeg", "gif", "bmp", "webp", "svg", "ico", "tif", "tiff"].includes(ext)) return Image;
-  if (["mp4", "mkv", "avi", "mov", "wmv", "webm"].includes(ext)) return Clapperboard;
-  if (["mp3", "wav", "flac", "aac", "ogg", "m4a"].includes(ext)) return Music;
-  if (["xls", "xlsx", "csv", "ods"].includes(ext)) return Table;
-  if (["zip", "rar", "7z", "iso", "cab", "tar", "gz"].includes(ext)) return FileArchive;
-  if (["js", "ts", "tsx", "jsx", "py", "json", "xml", "html", "css", "ps1", "ini", "cfg"].includes(ext)) return FileCode;
-  if (["exe", "msi", "dll", "sys", "com", "bat", "cmd", "scr"].includes(ext)) return AppWindow;
-  if (hasNote || ["txt", "md", "rtf", "doc", "docx", "pdf", "log"].includes(ext)) return FileText;
-  return File;
+  if (["png", "jpg", "jpeg", "gif", "bmp", "webp", "svg", "ico", "tif", "tiff"].includes(ext)) return [Image, "text-sky-600"];
+  if (["mp4", "mkv", "avi", "mov", "wmv", "webm"].includes(ext)) return [Clapperboard, "text-violet-500"];
+  if (["mp3", "wav", "flac", "aac", "ogg", "m4a"].includes(ext)) return [Music, "text-pink-500"];
+  if (["xls", "xlsx", "csv", "ods"].includes(ext)) return [Table, "text-green-600"];
+  if (["zip", "rar", "7z", "iso", "cab", "tar", "gz"].includes(ext)) return [FileArchive, "text-amber-700"];
+  if (["js", "ts", "tsx", "jsx", "py", "json", "xml", "html", "css", "ps1", "ini", "cfg"].includes(ext)) return [FileCode, "text-indigo-500"];
+  if (["exe", "msi", "dll", "sys", "com", "bat", "cmd", "scr"].includes(ext)) return [AppWindow, "text-accent"];
+  if (hasNote || ["txt", "md", "rtf", "doc", "docx", "pdf", "log"].includes(ext)) return [FileText, "text-sky-700"];
+  return [File, "text-muted"];
 }
 
 function RibbonButton({
@@ -123,7 +134,7 @@ function RibbonButton({
       title={label}
       onClick={onClick}
       className={
-        "flex h-14 shrink-0 flex-col items-center justify-center gap-1 rounded-sm px-2 text-xs whitespace-nowrap " +
+        "flex h-8 shrink-0 items-center gap-1.5 rounded-md px-2 text-[13px] whitespace-nowrap " +
         (active ? "bg-select" : "hover:bg-header")
       }
     >
@@ -136,8 +147,8 @@ function RibbonButton({
 function GroupBox({ title, children }: { title: string; children: ReactNode }) {
   return (
     <div className="flex shrink-0 flex-col border-r border-ribbon-edge px-1">
-      <div className="flex items-end">{children}</div>
-      <div className="pb-1 text-center text-xs text-muted">{title}</div>
+      <div className="flex items-center">{children}</div>
+      <div className="pb-0.5 text-center text-[11px] text-muted">{title}</div>
     </div>
   );
 }
@@ -146,7 +157,7 @@ function MenuPop({ children, onClose }: { children: ReactNode; onClose: () => vo
   return (
     <>
       <button type="button" aria-label="Close menu" className="fixed inset-0 z-20 cursor-default" onClick={onClose} />
-      <div className="absolute top-full left-0 z-30 max-h-72 min-w-52 overflow-auto border border-line bg-pane py-1 shadow-md">{children}</div>
+      <div className="absolute top-full left-0 z-30 max-h-80 min-w-56 overflow-auto rounded-lg border border-line bg-menu p-1 shadow-xl">{children}</div>
     </>
   );
 }
@@ -247,23 +258,90 @@ function LabeledSelect({ label, value, onChange, children }: { label: string; va
   );
 }
 
-function FlagSelect() {
+function ViewMenu() {
+  const viewMode = useFiles((s) => s.viewMode);
+  const detailsOpen = useFiles((s) => s.detailsOpen);
+  const previewOpen = useFiles((s) => s.previewOpen);
+  const showNav = useFiles((s) => s.showNav);
+  const compact = useFiles((s) => s.compact);
+  const itemChecks = useFiles((s) => s.itemChecks);
+  const showExt = useFiles((s) => s.showExt);
   const showHidden = useFiles((s) => s.filters.showHidden);
   const showReadonly = useFiles((s) => s.filters.showReadonly);
   const showSystem = useFiles((s) => s.filters.showSystem);
-  const set = useFiles.getState().setFilters;
-  const box = (label: string, checked: boolean, key: "showHidden" | "showReadonly" | "showSystem") => (
-    <label className="flex items-center gap-1 whitespace-nowrap">
-      <input type="checkbox" checked={checked} onChange={(e) => set({ [key]: e.target.checked })} />
-      {label}
-    </label>
+  const [open, setOpen] = useState(false);
+  const [show, setShow] = useState(false);
+  const set = useFiles.getState().setOptions;
+  const filters = useFiles.getState().setFilters;
+  const row = (on: boolean, label: string, fn: () => void, icon?: ReactNode, nest?: boolean) => (
+    <button
+      type="button"
+      className="flex min-h-9 w-full items-center gap-2 rounded-md px-2 text-left text-sm hover:bg-select"
+      onMouseEnter={() => { if (!nest) setShow(false); }}
+      onClick={fn}
+    >
+      <span className="grid w-4 shrink-0 place-items-center">{on ? <Check className="size-4" /> : null}</span>
+      <span className="grid w-5 shrink-0 place-items-center text-muted">{icon}</span>
+      <span className="min-w-0 flex-1">{label}</span>
+      {nest ? <ChevronRight className="size-3.5 text-muted" /> : null}
+    </button>
   );
+  const layouts: Array<[ViewMode, string, ReactNode]> = [
+    ["xlarge", "Extra large icons", <LayoutGrid className="size-4" />],
+    ["large", "Large icons", <LayoutGrid className="size-4" />],
+    ["medium", "Medium icons", <LayoutGrid className="size-3.5" />],
+    ["small", "Small icons", <LayoutGrid className="size-3" />],
+    ["list", "List", <List className="size-4" />],
+    ["details", "Details", <ListTree className="size-4" />],
+    ["tiles", "Tiles", <Columns2 className="size-4" />],
+    ["content", "Content", <FileText className="size-4" />],
+  ];
   return (
-    <div className="flex h-14 items-center gap-3 px-2 text-sm">
-      {box("Hidden", showHidden, "showHidden")}
-      {box("Read-only", showReadonly, "showReadonly")}
-      {box("System", showSystem, "showSystem")}
+    <div className="relative">
+      <button type="button" className={"flex h-8 items-center gap-1 rounded-md px-2 text-[13px] " + (open ? "bg-select" : "hover:bg-header")} onClick={() => { setOpen((v) => !v); setShow(false); }}>
+        <List className="size-4" />
+        View
+        <ChevronDown className="size-3.5 text-muted" />
+      </button>
+      {open && (
+        <>
+          <button type="button" aria-label="Close view menu" className="fixed inset-0 z-20 cursor-default" onClick={() => setOpen(false)} />
+          <div className="absolute top-full left-0 z-30 mt-1 w-64 rounded-lg border border-line bg-menu p-1 shadow-xl">
+            {layouts.map(([id, label, icon]) => (
+              <span key={id}>{row(viewMode === id, label, () => { set({ viewMode: id }); setOpen(false); }, icon)}</span>
+            ))}
+            <div className="my-1 h-px bg-line" />
+            {row(detailsOpen, "Details pane", () => set({ detailsOpen: !detailsOpen }), <PanelLeft className="size-4" />)}
+            {row(previewOpen, "Preview pane", () => set({ previewOpen: !previewOpen }), <File className="size-4" />)}
+            <div className="my-1 h-px bg-line" />
+            <div className="relative" onMouseEnter={() => setShow(true)}>
+              {row(false, "Show", () => setShow((v) => !v), <List className="size-4" />, true)}
+              {show && (
+                <div className="absolute top-0 left-full z-40 ml-1 w-60 rounded-lg border border-line bg-menu p-1 shadow-xl">
+                  {row(showNav, "Navigation pane", () => set({ showNav: !showNav }), <PanelLeft className="size-4" />)}
+                  {row(compact, "Compact view", () => set({ compact: !compact }), <List className="size-4" />)}
+                  {row(itemChecks, "Item check boxes", () => set({ itemChecks: !itemChecks }), <Check className="size-4" />)}
+                  {row(showExt, "File name extensions", () => set({ showExt: !showExt }), <FileText className="size-4" />)}
+                  {row(showHidden, "Hidden items", () => filters({ showHidden: !showHidden }), <EyeOffIcon />)}
+                  {row(showReadonly, "Read-only items", () => filters({ showReadonly: !showReadonly }), <File className="size-4" />)}
+                  {row(showSystem, "System items", () => filters({ showSystem: !showSystem }), <HardDrive className="size-4" />)}
+                </div>
+              )}
+            </div>
+          </div>
+        </>
+      )}
     </div>
+  );
+}
+
+function EyeOffIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="size-4" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+      <path d="M3 3l18 18" />
+      <path d="M10.6 10.6A3 3 0 0 0 12 15a3 3 0 0 0 2.4-4.4" />
+      <path d="M9.9 5.2A10.8 10.8 0 0 1 12 5c5.5 0 9.5 4.5 10.5 7-0.4 1-1.2 2.3-2.3 3.5M6.1 6.1C4.2 7.4 2.8 9.2 1.5 12c1 2.5 5 7 10.5 7 1.3 0 2.5-.3 3.6-.8" />
+    </svg>
   );
 }
 
@@ -334,7 +412,7 @@ function TabRow() {
           key={id}
           type="button"
           onClick={() => go(id)}
-          className={"shrink-0 px-3 py-1.5 text-sm " + (tab === id ? "bg-ribbon font-semibold text-ink" : "text-tab-ink hover:bg-white/10")}
+          className={"shrink-0 rounded-t-md px-3 py-1.5 text-sm " + (tab === id ? "bg-pane font-semibold text-ink" : "text-muted hover:bg-header")}
         >
           {label}
         </button>
@@ -441,7 +519,7 @@ function HomeRibbon() {
         <RibbonButton label="Refresh" icon={<RefreshCw className="size-4" />} onClick={() => store().refresh()} />
         <RibbonButton label="Measure" icon={<Ruler className="size-4" />} onClick={() => void store().calcSizes()} />
         <RibbonButton label={barMode === "log" ? "Compressed" : "Even bars"} icon={<Scale className="size-4" />} active={barMode === "log"} onClick={() => store().toggleBarMode()} />
-        <FlagSelect />
+        <ViewMenu />
       </GroupBox>
       <GroupBox title="Details">
         <div className="hidden h-14 w-40 flex-col justify-center px-2 text-xs leading-snug lg:flex">
@@ -530,7 +608,7 @@ function InspectRibbon() {
         </LabeledSelect>
       </GroupBox>
       <GroupBox title="Narrow">
-        <FlagSelect />
+        <ViewMenu />
         <RibbonButton label="Deep search" icon={<Search className="size-4" />} onClick={() => useFiles.getState().openDialog({ kind: "search" })} />
         <RibbonButton label="Pattern" icon={<ListFilter className="size-4" />} onClick={() => useFiles.getState().openDialog({ kind: "mask" })} />
         <RibbonButton label="Rule" icon={<Filter className="size-4" />} onClick={() => useFiles.getState().openDialog({ kind: "custom" })} />
@@ -781,6 +859,85 @@ function TreeBranch({ id, depth, pane }: { id: string; depth: number; pane: 0 | 
   );
 }
 
+function IconBoard({ index, rows, mode }: { index: 0 | 1; rows: ListRow[]; mode: ViewMode }) {
+  const nodes = useFiles((s) => s.nodes);
+  const selectedIds = useFiles((s) => s.panes[index].selected);
+  const showExt = useFiles((s) => s.showExt);
+  const itemChecks = useFiles((s) => s.itemChecks);
+  const clipboard = useFiles((s) => s.clipboard);
+  const icon = mode === "xlarge" ? "size-16" : mode === "large" ? "size-12" : mode === "medium" ? "size-8" : "size-5";
+  const wide = mode === "list" || mode === "content" || mode === "tiles";
+  return (
+    <div className={wide ? "flex flex-col gap-0.5 p-1" : "grid gap-1 p-2 " + (mode === "xlarge" ? "grid-cols-[repeat(auto-fill,minmax(132px,1fr))]" : mode === "small" ? "grid-cols-[repeat(auto-fill,minmax(84px,1fr))]" : "grid-cols-[repeat(auto-fill,minmax(104px,1fr))]")}>
+      {rows.length === 0 && <p className="col-span-full px-3 py-8 text-center text-muted">This folder is empty.</p>}
+      {rows.map((row) => {
+        const selected = selectedIds.includes(row.id);
+        const cut = clipboard?.mode === "cut" && row.nodeId && clipboard.ids.includes(row.nodeId);
+        const label = row.kind === "drive" && row.nodeId && nodes[row.nodeId] ? driveCaption(nodes[row.nodeId]) : shownName(row.name, row.kind, showExt);
+        return (
+          <button
+            key={row.id}
+            type="button"
+            data-row={row.id}
+            className={
+              "flex rounded-md text-left " +
+              (wide ? "items-center gap-2 px-2 py-1" : "flex-col items-center gap-1 px-2 py-2 text-center") +
+              (selected ? " bg-select" : " hover:bg-header") +
+              (cut ? " opacity-50" : "")
+            }
+            onClick={(e) => {
+              const ids = rows.map((item) => item.id);
+              if (e.shiftKey) useFiles.getState().selectRange(index, row.id, ids);
+              else if (e.metaKey || e.ctrlKey) useFiles.getState().toggleSelect(index, row.id);
+              else useFiles.getState().selectOnly(index, row.id);
+            }}
+            onDoubleClick={() => row.nodeId && useFiles.getState().openItem(index, row.nodeId)}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              useFiles.getState().setActive(index);
+              if (row.nodeId) useFiles.getState().selectOnly(index, row.nodeId);
+              useFiles.getState().openMenu({ x: e.clientX, y: e.clientY, id: row.nodeId ?? null });
+            }}
+          >
+            {itemChecks && <input type="checkbox" checked={selected} readOnly tabIndex={-1} aria-label={`Select ${row.name}`} />}
+            <Icon node={{ kind: row.kind, name: row.name, note: row.note }} className={icon + " shrink-0"} />
+            <span className={wide ? "min-w-0 flex-1" : "w-full"}>
+              <span className={"block truncate " + (wide ? "" : "text-xs")} title={row.name}>{label}</span>
+              {(mode === "content" || mode === "tiles") && (
+                <span className="block truncate text-xs text-muted">{typeLabel(row.nodeId && nodes[row.nodeId] ? nodes[row.nodeId] : ({ kind: row.kind, name: row.name } as FsNode))}</span>
+              )}
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function PreviewPane({ index }: { index: 0 | 1 }) {
+  const pane = useFiles((s) => s.panes[index]);
+  const nodes = useFiles((s) => s.nodes);
+  const showExt = useFiles((s) => s.showExt);
+  const id = pane.selected[0];
+  const node = id ? nodes[id] : undefined;
+  return (
+    <aside className="hidden w-72 shrink-0 flex-col border-l border-line bg-tree p-4 lg:flex">
+      {node ? (
+        <>
+          <Icon node={node} className="size-16" />
+          <h2 className="mt-3 truncate text-sm font-semibold" title={node.name}>{node.kind === "drive" ? driveCaption(node) : shownName(node.name, node.kind, showExt)}</h2>
+          <p className="mt-1 text-xs text-muted">{typeLabel(node)}</p>
+          <p className="mt-3 text-sm">{node.kind === "file" ? formatSize(node.bytes) : shownSize(node.bytes, node.approx) || "Folder"}</p>
+          {node.note && <p className="mt-2 text-sm text-muted">{node.note}</p>}
+        </>
+      ) : (
+        <p className="text-sm text-muted">Select a file to preview it.</p>
+      )}
+    </aside>
+  );
+}
+
 function PaneView({ index }: { index: 0 | 1 }) {
   const state = useFiles();
   const pane = state.panes[index];
@@ -912,7 +1069,7 @@ function PaneView({ index }: { index: 0 | 1 }) {
           useFiles.getState().transferTo(ids, pane.pathId, e.ctrlKey || e.metaKey ? "copy" : "move");
         }}
       >
-        <aside className={(places ? "absolute inset-0 z-10 w-full" : "hidden") + " overflow-auto border-r border-line bg-tree sm:static sm:block sm:w-56 sm:shrink-0"}>
+        <aside className={!state.showNav ? "hidden" : (places ? "absolute inset-0 z-10 w-full " : "hidden ") + "overflow-auto border-r border-line bg-tree sm:static sm:block sm:w-56 sm:shrink-0"}>
           <TreeBranch id="pc" depth={0} pane={index} />
         </aside>
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -924,6 +1081,7 @@ function PaneView({ index }: { index: 0 | 1 }) {
             useFiles.getState().openMenu({ x: e.clientX, y: e.clientY, id: null });
           }}
         >
+          {state.viewMode === "details" ? (
           <table
             className={"table-fixed border-collapse text-left " + (state.reading ? "text-base" : "text-sm")}
             style={{ width: `max(${tableWidth}px, 100%)` }}
@@ -954,8 +1112,8 @@ function PaneView({ index }: { index: 0 | 1 }) {
                     draggable={Boolean(row.nodeId)}
                     aria-selected={selected}
                     className={
-                      "border-t border-line/70 " +
-                      (selected ? "bg-select" : row.hit || row.onlyHere || row.dupe ? "bg-diff" : "hover:bg-header") +
+                      (state.compact ? "" : " ") +
+                      (selected ? "bg-select" : "hover:bg-header") +
                       (cut ? " opacity-50" : "")
                     }
                     onClick={(e) => {
@@ -1001,12 +1159,21 @@ function PaneView({ index }: { index: 0 | 1 }) {
                       useFiles.getState().openMenu({ x: e.clientX, y: e.clientY, id: row.nodeId ?? null });
                     }}
                   >
-                    <td className="overflow-hidden px-2 py-3 sm:py-1" style={columnBox(cols.name)}>
+                    <td className={"overflow-hidden px-2 " + (state.compact ? "py-0.5" : "py-1.5")} style={columnBox(cols.name)}>
                       <span className="flex items-center gap-2">
+                        {state.itemChecks && (
+                          <input
+                            type="checkbox"
+                            checked={selected}
+                            onClick={(e) => e.stopPropagation()}
+                            onChange={() => useFiles.getState().toggleSelect(index, row.id)}
+                            aria-label={`Select ${row.name}`}
+                          />
+                        )}
                         <Icon node={{ kind: row.kind, name: row.name, note: row.note }} />
                         <span className="min-w-0 flex-1">
                           <span className="block truncate" title={row.kind === "drive" && row.nodeId && nodes[row.nodeId] ? driveCaption(nodes[row.nodeId]) : row.name}>
-                            {row.kind === "drive" && row.nodeId && nodes[row.nodeId] ? driveCaption(nodes[row.nodeId]) : row.name}
+                            {row.kind === "drive" && row.nodeId && nodes[row.nodeId] ? driveCaption(nodes[row.nodeId]) : shownName(row.name, row.kind, state.showExt)}
                           </span>
                           {row.path && <span className="block truncate text-xs text-muted" title={row.path}>{row.path}</span>}
                           {row.onlyHere && <span className="text-xs text-accent">Missing opposite</span>}
@@ -1050,10 +1217,14 @@ function PaneView({ index }: { index: 0 | 1 }) {
               )}
             </tbody>
           </table>
+          ) : (
+            <IconBoard index={index} rows={view.rows} mode={state.viewMode} />
+          )}
         </div>
         {state.detailsOpen && <DetailsStrip index={index} compact className={state.split ? "flex 2xl:hidden" : "flex lg:hidden"} />}
         </div>
         {state.detailsOpen && <DetailsStrip index={index} className={state.split ? "hidden shrink-0 2xl:flex" : "hidden shrink-0 lg:flex"} />}
+        {state.previewOpen && <PreviewPane index={index} />}
       </div>
       <footer className="flex h-8 shrink-0 items-center gap-3 border-t border-line bg-status px-2 text-xs">
         <span className="min-w-0 flex-1 truncate">
@@ -2171,6 +2342,13 @@ export function FileManager() {
         detailHeight: state.detailHeight,
         detailWidth: state.detailWidth,
         detailsOpen: state.detailsOpen,
+        viewMode: state.viewMode,
+        showNav: state.showNav,
+        compact: state.compact,
+        itemChecks: state.itemChecks,
+        showExt: state.showExt,
+        previewOpen: state.previewOpen,
+        uiRev: 2,
       };
       try {
         localStorage.setItem(UI_KEY, JSON.stringify(prefs));
@@ -2271,8 +2449,8 @@ export function FileManager() {
   const readerId = useFiles((s) => s.readerId);
   return (
     <div className="flex h-dvh flex-col overflow-hidden bg-app text-ink">
-      <header className="flex h-8 shrink-0 items-center justify-center bg-tab">
-        <h1 className="text-sm font-semibold text-accent">Data Finder</h1>
+      <header className="flex h-8 shrink-0 items-center px-3">
+        <h1 className="text-xs font-semibold">Data Finder</h1>
       </header>
       <TabRow />
       <Ribbon />
