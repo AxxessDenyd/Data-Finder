@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { Group, Panel, Separator } from "react-resizable-panels";
 import {
   AppWindow,
@@ -150,6 +150,39 @@ function GroupBox({ title, children }: { title: string; children: ReactNode }) {
       <div className="flex items-center">{children}</div>
       <div className="pb-0.5 text-center text-[11px] text-muted">{title}</div>
     </div>
+  );
+}
+
+function SectionMenu({ label, children }: { label: string; children: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        className={"flex h-8 items-center gap-1 rounded-md px-2 text-[13px] " + (open ? "bg-select" : "hover:bg-header")}
+        onClick={() => setOpen((value) => !value)}
+      >
+        {label}
+        <ChevronDown className="size-3.5 text-muted" />
+      </button>
+      {open && (
+        <>
+          <button type="button" aria-label={`Close ${label}`} className="fixed inset-0 z-20 cursor-default" onClick={() => setOpen(false)} />
+          <div className="absolute top-full left-0 z-30 mt-1 w-60 rounded-lg border border-line bg-menu p-1 shadow-xl" onClick={() => setOpen(false)}>
+            {children}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function MenuAction({ label, icon, disabled, onClick }: { label: string; icon?: ReactNode; disabled?: boolean; onClick: (event: MouseEvent<HTMLButtonElement>) => void }) {
+  return (
+    <button type="button" disabled={disabled} onClick={onClick} className="flex min-h-9 w-full items-center gap-2 rounded-md px-2 text-left text-sm hover:bg-select disabled:opacity-40">
+      <span className="grid size-4 shrink-0 place-items-center text-muted">{icon}</span>
+      <span className="truncate">{label}</span>
+    </button>
   );
 }
 
@@ -428,8 +461,6 @@ function TabRow() {
 
 function Ribbon() {
   const tab = useFiles((s) => s.tab);
-  const reading = useFiles((s) => s.reading);
-  if (reading && tab !== "options") return null;
   return (
     <div className="shrink-0 border-b border-ribbon-edge bg-ribbon">
       {tab === "home" && <HomeRibbon />}
@@ -444,16 +475,10 @@ function Ribbon() {
 function HomeRibbon() {
   const active = useFiles((s) => s.active);
   const split = useFiles((s) => s.split);
-  const diff = useFiles((s) => s.diff);
   const barMode = useFiles((s) => s.barMode);
-  const logOpen = useFiles((s) => s.logOpen);
-  const transfersOpen = useFiles((s) => s.transfersOpen);
   const canUndo = useFiles((s) => s.undoStack.length > 0);
-  const dupes = useFiles((s) => s.dupes);
-  const flat = useFiles((s) => s.panes[s.active].flat);
   const pathId = useFiles((s) => s.panes[s.active].pathId);
   const selected = useFiles((s) => s.panes[s.active].selected);
-  const favorites = useFiles((s) => s.favorites);
   const recent = useFiles((s) => s.recent);
   const nodes = useFiles((s) => s.nodes);
   const order = useFiles((s) => s.order);
@@ -463,113 +488,71 @@ function HomeRibbon() {
   const infoKnown = selected.every((id) => nodes[id]?.bytes != null);
   const [favOpen, setFavOpen] = useState(false);
   const [favBox, setFavBox] = useState<DOMRect | null>(null);
-  const favRef = useRef<HTMLDivElement>(null);
-  const [histOpen, setHistOpen] = useState(false);
   const [desktop, setDesktop] = useState(false);
   const store = useFiles.getState;
   useEffect(() => setDesktop(isDesktop()), []);
 
   return (
-    <div className="flex items-stretch gap-1 overflow-x-auto px-1 py-1 lg:flex-wrap lg:overflow-x-visible">
-      <GroupBox title="Hold">
-        <RibbonButton label="Cut" disabled={!selected.length} icon={<Scissors className="size-4" />} onClick={() => store().cut()} />
-        <RibbonButton label="Copy" disabled={!selected.length} icon={<Copy className="size-4" />} onClick={() => store().copy()} />
-        <RibbonButton label="Paste" icon={<ClipboardPaste className="size-4" />} onClick={() => store().paste()} />
-      </GroupBox>
-      <GroupBox title="Edit">
-        <RibbonButton
-          label="Open"
-          disabled={!selected.length}
-          icon={<File className="size-4" />}
-          onClick={() => selected[0] && store().openItem(active, selected[0])}
-        />
-        <RibbonButton
-          label="Delete"
-          disabled={!selected.length}
-          icon={<Trash2 className="size-4" />}
-          onClick={() => selected.length && store().openDialog({ kind: "delete", ids: selected })}
-        />
-        <RibbonButton
-          label="Rename"
-          disabled={selected.length !== 1}
-          icon={<Pencil className="size-4" />}
-          onClick={() => {
-            const node = nodes[selected[0]];
-            if (node) store().openDialog({ kind: "rename", id: node.id, name: node.name });
-          }}
-        />
-        <RibbonButton
-          label="Undo"
-          disabled={!canUndo}
-          icon={<RotateCcw className="size-4" />}
-          onClick={() => store().undo()}
-        />
-        <RibbonButton label="New folder" icon={<FolderPlus className="size-4" />} onClick={() => store().openDialog({ kind: "new", file: false })} />
-        <RibbonButton label="New file" icon={<FilePlus className="size-4" />} onClick={() => store().openDialog({ kind: "new", file: true })} />
-      </GroupBox>
-      <GroupBox title="Go">
-        <RibbonButton label="Up" icon={<ArrowUp className="size-4" />} onClick={() => store().goUp()} />
-        <RibbonButton label={desktop ? "This computer" : "Open folder"} icon={<HardDrive className="size-4" />} onClick={() => void store().openFolder()} />
-        <RibbonButton label="Unmount" icon={<Unplug className="size-4" />} disabled={!drive || drive.mounted === false || drive.system} onClick={() => {
+    <div className="flex items-center gap-1 overflow-x-auto px-2 py-1">
+      <SectionMenu label="Hold">
+        <MenuAction label="Cut" disabled={!selected.length} icon={<Scissors className="size-4" />} onClick={() => store().cut()} />
+        <MenuAction label="Copy" disabled={!selected.length} icon={<Copy className="size-4" />} onClick={() => store().copy()} />
+        <MenuAction label="Paste" icon={<ClipboardPaste className="size-4" />} onClick={() => store().paste()} />
+      </SectionMenu>
+      <SectionMenu label="Edit">
+        <MenuAction label="Open" disabled={!selected.length} icon={<File className="size-4" />} onClick={() => selected[0] && store().openItem(active, selected[0])} />
+        <MenuAction label="Delete" disabled={!selected.length} icon={<Trash2 className="size-4" />} onClick={() => selected.length && store().openDialog({ kind: "delete", ids: selected })} />
+        <MenuAction label="Rename" disabled={selected.length !== 1} icon={<Pencil className="size-4" />} onClick={() => {
+          const node = nodes[selected[0]];
+          if (node) store().openDialog({ kind: "rename", id: node.id, name: node.name });
+        }} />
+        <MenuAction label="Undo" disabled={!canUndo} icon={<RotateCcw className="size-4" />} onClick={() => store().undo()} />
+        <MenuAction label="New folder" icon={<FolderPlus className="size-4" />} onClick={() => store().openDialog({ kind: "new", file: false })} />
+        <MenuAction label="New file" icon={<FilePlus className="size-4" />} onClick={() => store().openDialog({ kind: "new", file: true })} />
+      </SectionMenu>
+      <SectionMenu label="Go">
+        <MenuAction label="Up" icon={<ArrowUp className="size-4" />} onClick={() => store().goUp()} />
+        <MenuAction label={desktop ? "This computer" : "Open folder"} icon={<HardDrive className="size-4" />} onClick={() => void store().openFolder()} />
+        <MenuAction label="Unmount" disabled={!drive || drive.mounted === false || drive.system} icon={<Unplug className="size-4" />} onClick={() => {
           if (drive && !drive.system) store().openDialog({ kind: "unmount", id: drive.id });
         }} />
-        <RibbonButton label="Format" icon={<Trash2 className="size-4" />} disabled={!drive || drive.mounted === false || drive.system || !drive.name.endsWith(":")} onClick={() => {
+        <MenuAction label="Format" disabled={!drive || drive.mounted === false || drive.system || !drive.name.endsWith(":")} icon={<Trash2 className="size-4" />} onClick={() => {
           if (drive && !drive.system && drive.name.endsWith(":")) store().openDialog({ kind: "format", id: drive.id });
         }} />
-        <RibbonButton label="Refresh" icon={<RefreshCw className="size-4" />} onClick={() => store().refresh()} />
-        <RibbonButton label="Measure" icon={<Ruler className="size-4" />} onClick={() => void store().calcSizes()} />
-        <RibbonButton label={barMode === "log" ? "Compressed" : "Even bars"} icon={<Scale className="size-4" />} active={barMode === "log"} onClick={() => store().toggleBarMode()} />
-        <ViewMenu />
-      </GroupBox>
-      <GroupBox title="Details">
-        <div className="hidden h-14 w-40 flex-col justify-center px-2 text-xs leading-snug lg:flex">
-          <span className="truncate">
-            {infoCount ? `${infoCount} selected${infoKnown ? ` · ${formatSize(infoBytes)}` : ""}` : "Nothing selected"}
-          </span>
-          <span className="truncate text-muted">{nodes[pathId] ? displayPath({ nodes, order: {} }, pathId) : ""}</span>
-        </div>
-        <RibbonButton
-          label="Location"
-          icon={<Link className="size-4" />}
-          onClick={() => void store().copyPath(selected[0])}
-        />
-        <RibbonButton
-          label="Info"
-          disabled={selected.length !== 1}
-          icon={<FileText className="size-4" />}
-          onClick={() => selected[0] && store().openDialog({ kind: "props", id: selected[0] })}
-        />
-      </GroupBox>
-      <GroupBox title="Shortcuts">
-        <div ref={favRef}>
-          <RibbonButton label="Starred" icon={<Star className="size-4" />} active={favorites.includes(pathId) || favOpen} onClick={() => { setFavBox(favRef.current?.getBoundingClientRect() ?? null); setFavOpen((v) => !v); setHistOpen(false); }} />
-          {favOpen && favBox && <PlacesMenu anchor={favBox} onClose={() => setFavOpen(false)} />}
-        </div>
-        <div className="relative">
-          <RibbonButton label="Recent" icon={<History className="size-4" />} active={histOpen} onClick={() => { setHistOpen((v) => !v); setFavOpen(false); }} />
-          {histOpen && (
-            <MenuPop onClose={() => setHistOpen(false)}>
-              {[...recent].reverse().map((id) => (
-                <button key={id} type="button" className="block w-full truncate px-3 py-2 text-left hover:bg-select" onClick={() => { store().navigate(active, id); setHistOpen(false); }}>
-                  {nodes[id] ? displayPath({ nodes, order: {} }, id) : id}
-                </button>
-              ))}
-            </MenuPop>
-          )}
-        </div>
-      </GroupBox>
-      <GroupBox title="Layout">
-        <RibbonButton label="Two panes" icon={<Columns2 className="size-4" />} active={split} onClick={() => store().toggleSplit()} />
-        <RibbonButton label="Gaps" icon={<Diff className="size-4" />} active={diff} onClick={() => store().toggleDiff()} />
-        <RibbonButton label="Copy missing" disabled={!split} icon={<ArrowLeftRight className="size-4" />} onClick={() => store().mirror()} />
-        <RibbonButton label="Update other" disabled={!split} icon={<FolderSync className="size-4" />} onClick={() => store().syncOther()} />
-        <RibbonButton label="All files" icon={<ListTree className="size-4" />} active={flat} onClick={() => store().toggleFlat()} />
-        <RibbonButton label="Line up" disabled={!split} icon={<GitCompare className="size-4" />} onClick={() => store().compare()} />
-        <RibbonButton label="Same size" icon={<Files className="size-4" />} active={dupes} onClick={() => store().toggleDupes()} />
-        <RibbonButton label="Queue" icon={<ClipboardPaste className="size-4" />} active={transfersOpen} onClick={() => store().toggleTransfers()} />
-        <RibbonButton label="Activity" icon={<FileText className="size-4" />} active={logOpen} onClick={() => store().toggleLog()} />
-        <RibbonButton label="How to" icon={<CircleHelp className="size-4" />} onClick={() => store().openDialog({ kind: "help" })} />
-      </GroupBox>
+        <MenuAction label="Refresh" icon={<RefreshCw className="size-4" />} onClick={() => store().refresh()} />
+        <MenuAction label="Measure" icon={<Ruler className="size-4" />} onClick={() => void store().calcSizes()} />
+        <MenuAction label={barMode === "log" ? "Compressed bars" : "Even bars"} icon={<Scale className="size-4" />} onClick={() => store().toggleBarMode()} />
+      </SectionMenu>
+      <ViewMenu />
+      <SectionMenu label="Details">
+        <p className="px-2 py-1 text-xs text-muted">
+          {infoCount ? `${infoCount} selected${infoKnown ? ` · ${formatSize(infoBytes)}` : ""}` : "Nothing selected"}
+        </p>
+        <MenuAction label="Show details" icon={<PanelLeft className="size-4" />} onClick={() => store().setOptions({ detailsOpen: true })} />
+        <MenuAction label="Copy location" icon={<Link className="size-4" />} onClick={() => void store().copyPath(selected[0])} />
+        <MenuAction label="Info" disabled={selected.length !== 1} icon={<FileText className="size-4" />} onClick={() => selected[0] && store().openDialog({ kind: "props", id: selected[0] })} />
+      </SectionMenu>
+      <SectionMenu label="Shortcuts">
+        <MenuAction label="Starred" icon={<Star className="size-4" />} onClick={(event) => { setFavBox(event.currentTarget.getBoundingClientRect()); setFavOpen(true); }} />
+        <div className="my-1 h-px bg-line" />
+        {recent.length === 0 && <p className="px-2 py-1 text-xs text-muted">No recent folders</p>}
+        {[...recent].reverse().map((id) => (
+          <MenuAction key={id} label={nodes[id] ? displayPath({ nodes, order: {} }, id) : id} icon={<History className="size-4" />} onClick={() => store().navigate(active, id)} />
+        ))}
+      </SectionMenu>
+      {favOpen && favBox && <PlacesMenu anchor={favBox} onClose={() => setFavOpen(false)} />}
+      <SectionMenu label="Layout">
+        <MenuAction label="Two panes" icon={<Columns2 className="size-4" />} onClick={() => store().toggleSplit()} />
+        <MenuAction label="Gaps" icon={<Diff className="size-4" />} onClick={() => store().toggleDiff()} />
+        <MenuAction label="Copy missing" disabled={!split} icon={<ArrowLeftRight className="size-4" />} onClick={() => store().mirror()} />
+        <MenuAction label="Update other" disabled={!split} icon={<FolderSync className="size-4" />} onClick={() => store().syncOther()} />
+        <MenuAction label="All files" icon={<ListTree className="size-4" />} onClick={() => store().toggleFlat()} />
+        <MenuAction label="Line up" disabled={!split} icon={<GitCompare className="size-4" />} onClick={() => store().compare()} />
+        <MenuAction label="Same size" icon={<Files className="size-4" />} onClick={() => store().toggleDupes()} />
+        <MenuAction label="Queue" icon={<ClipboardPaste className="size-4" />} onClick={() => store().toggleTransfers()} />
+        <MenuAction label="Activity" icon={<FileText className="size-4" />} onClick={() => store().toggleLog()} />
+        <MenuAction label="How to" icon={<CircleHelp className="size-4" />} onClick={() => store().openDialog({ kind: "help" })} />
+      </SectionMenu>
     </div>
   );
 }
@@ -817,6 +800,7 @@ function TreeBranch({ id, depth, pane }: { id: string; depth: number; pane: 0 | 
   const nodes = useFiles((s) => s.nodes);
   const pathId = useFiles((s) => s.panes[pane].pathId);
   const filters = useFiles((s) => s.filters);
+  const reading = useFiles((s) => s.reading);
   const [open, setOpen] = useState(depth < 1 || id === "c");
   const inPath = pathIds({ nodes, order: {} }, pathId).includes(id);
   useEffect(() => {
@@ -832,7 +816,7 @@ function TreeBranch({ id, depth, pane }: { id: string; depth: number; pane: 0 | 
     <div>
       <button
         type="button"
-        className={"flex w-full items-center gap-1 py-2 pr-2 text-left hover:bg-select sm:py-1 " + (here ? "bg-select" : "")}
+        className={"flex w-full items-center gap-1 py-2 pr-2 text-left hover:bg-select sm:py-1 " + (reading ? "text-base " : "text-sm ") + (here ? "bg-select" : "")}
         style={{ paddingLeft: 8 + depth * 14 }}
         onClick={() => {
           if (folders.length) setOpen((v) => !v);
@@ -1237,9 +1221,13 @@ function PaneView({ index }: { index: 0 | 1 }) {
           {view.rows.filter((row) => pane.selected.includes(row.id)).length} of {view.rows.length} items selected
           {hiddenCount > 0 ? ` · ${hiddenCount} filtered` : ""}
         </span>
-        {!state.detailsOpen && (
-          <button type="button" className="shrink-0 underline" onClick={() => useFiles.getState().setOptions({ detailsOpen: true })}>
+        {!state.detailsOpen ? (
+          <button type="button" className="shrink-0 rounded-md px-2 py-0.5 hover:bg-header" onClick={() => useFiles.getState().setOptions({ detailsOpen: true })}>
             Details
+          </button>
+        ) : (
+          <button type="button" className="shrink-0 rounded-md bg-select px-2 py-0.5" onClick={() => useFiles.getState().setOptions({ detailsOpen: false })}>
+            Hide details
           </button>
         )}
         {drive && (
@@ -2374,7 +2362,7 @@ export function FileManager() {
         showExt: state.showExt,
         previewOpen: state.previewOpen,
         snaps: state.snaps,
-        uiRev: 2,
+        uiRev: 3,
       };
       try {
         localStorage.setItem(UI_KEY, JSON.stringify(prefs));
