@@ -755,6 +755,19 @@ function TreeBranch({ id, depth, pane }: { id: string; depth: number; pane: 0 | 
           if (folders.length) setOpen((v) => !v);
           useFiles.getState().navigate(pane, id);
         }}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          useFiles.getState().setActive(pane);
+          useFiles.getState().openMenu({ x: e.clientX, y: e.clientY, id });
+        }}
+        onPointerUp={(e) => {
+          if (e.button !== 2) return;
+          e.preventDefault();
+          e.stopPropagation();
+          useFiles.getState().setActive(pane);
+          useFiles.getState().openMenu({ x: e.clientX, y: e.clientY, id });
+        }}
       >
         {folders.length ? (
           open ? <ChevronDown className="size-3.5 shrink-0" /> : <ChevronRight className="size-3.5 shrink-0" />
@@ -974,6 +987,14 @@ function PaneView({ index }: { index: 0 | 1 }) {
                       useFiles.getState().transferTo(ids, row.nodeId, e.ctrlKey || e.metaKey ? "copy" : "move");
                     }}
                     onContextMenu={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      useFiles.getState().setActive(index);
+                      if (row.nodeId && !pane.selected.includes(row.nodeId)) useFiles.getState().selectOnly(index, row.nodeId);
+                      useFiles.getState().openMenu({ x: e.clientX, y: e.clientY, id: row.nodeId ?? null });
+                    }}
+                    onPointerUp={(e) => {
+                      if (e.button !== 2) return;
                       e.preventDefault();
                       e.stopPropagation();
                       useFiles.getState().setActive(index);
@@ -1918,7 +1939,7 @@ function ContextMenu() {
   const createIn = node && node.kind !== "file" ? node.id : undefined;
   return (
     <>
-      <button type="button" aria-label="Close menu" className="fixed inset-0 z-30" onClick={() => useFiles.getState().openMenu(null)} />
+      <button type="button" aria-label="Close menu" className="fixed inset-0 z-30" onMouseDown={(e) => { if (e.button === 0) useFiles.getState().openMenu(null); }} onContextMenu={(e) => e.preventDefault()} />
       <div className="fixed z-40 min-w-44 border border-line bg-pane py-1 shadow-md" style={{ left, top }}>
         {id && item("Open", () => useFiles.getState().openItem(useFiles.getState().active, id))}
         {id && item("Show folder", () => useFiles.getState().reveal(useFiles.getState().active, id))}
