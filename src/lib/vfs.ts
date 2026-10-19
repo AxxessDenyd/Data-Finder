@@ -64,11 +64,9 @@ export function formatDate(ts: number): string {
 
 export function driveCaption(node: FsNode): string {
   const letter = node.name;
-  const label = node.label?.trim();
-  if (label && letter.endsWith(":")) return `${label} (${letter})`;
-  if (letter.endsWith(":") && node.note) return `${node.note} (${letter})`;
-  if (label) return `${label} (${letter})`;
-  return letter;
+  const label = node.label?.trim() || node.note?.trim() || "";
+  if (letter.endsWith(":")) return label ? `${letter}\\ [${label}]` : `${letter}\\`;
+  return label || letter;
 }
 
 export function typeLabel(node: FsNode): string {
@@ -126,6 +124,7 @@ export function createSeed(): FsSnapshot {
     modified: d(0, 12, 5),
     note: "Local Disk",
     mounted: true,
+    system: true,
   });
   const backup = add(pc, "D:", "drive", {
     id: "d",

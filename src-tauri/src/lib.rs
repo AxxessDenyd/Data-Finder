@@ -2,6 +2,7 @@ use serde::Serialize;
 use std::fs::{self, File};
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 #[derive(Serialize)]
 struct DiskEntry {
@@ -612,6 +613,88 @@ fn read_text(path: String) -> Result<String, String> {
     Ok(buf)
 }
 
+#[tauri::command]
+fn mount_image(path: String) -> Result<String, String> {
+    #[cfg(windows)]
+    {
+        let lower = path.to_lowercase();
+        if !lower.ends_with(".iso") {
+            return Err("Only an ISO image can be mounted".into());
+        }
+        if !Path::new(&path).is_file() {
+            return Err("That image was not found".into());
+        }
+        let status = Command::new("powershell")
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "Mount-DiskImage -ImagePath $env:DF_IMAGE | Out-Null",
+            ])
+            .env("DF_IMAGE", &path)
+            .status()
+            .map_err(|err| err.to_string())?;
+        if !status.success() {
+            return Err("Could not mount that image".into());
+        }
+        Ok("Image mounted".into())
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = path;
+        Err("Mount only works in the Windows program".into())
+    }
+}
+
+#[tauri::command]
+fn format_drive(path: String, filesystem: String, label: String) -> Result<String, String> {
+    #[cfg(windows)]
+    {
+        let letter = path
+            .chars()
+            .next()
+            .filter(|ch| ch.is_ascii_alphabetic())
+            .ok_or_else(|| "That drive cannot be formatted".to_string())?
+            .to_ascii_uppercase();
+        if path.starts_with("\\\\") || windows_letter() == Some(letter) {
+            return Err("The Windows drive cannot be formatted".into());
+        }
+        let fs = match filesystem.to_ascii_uppercase().as_str() {
+            "NTFS" => "NTFS",
+            "EXFAT" => "exFAT",
+            "FAT32" => "FAT32",
+            _ => return Err("Choose NTFS, exFAT, or FAT32".into()),
+        };
+        let limit = if fs == "FAT32" { 11 } else { 32 };
+        let clean: String = label
+            .chars()
+            .filter(|ch| ch.is_ascii_alphanumeric() || *ch == ' ' || *ch == '-' || *ch == '_')
+            .take(limit)
+            .collect();
+        let vol = clean.trim();
+        let volume = if vol.is_empty() { "Data" } else { vol };
+        let status = Command::new("format.com")
+            .args([
+                format!("{letter}:"),
+                format!("/FS:{fs}"),
+                format!("/V:{volume}"),
+                "/Q".into(),
+                "/Y".into(),
+            ])
+            .status()
+            .map_err(|err| err.to_string())?;
+        if !status.success() {
+            return Err("Could not format that drive. Windows may need an administrator.".into());
+        }
+        Ok(format!("{letter}:\\ formatted"))
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (path, filesystem, label);
+        Err("Format only works in the Windows program".into())
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -625,7 +708,9 @@ pub fn run() {
             copy_item,
             move_item,
             measure_children,
-            unmount_drive
+            unmount_drive,
+            mount_image,
+            format_drive
         ])
         .run(tauri::generate_context!())
         .expect("Data Finder failed to start");

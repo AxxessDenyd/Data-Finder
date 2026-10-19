@@ -113,6 +113,14 @@ function makeNode(id: string, parentId: string | null, entry: RawEntry): FsNode 
   };
 }
 
+export async function mountImage(path: string): Promise<string> {
+  return invoke<string>("mount_image", { path });
+}
+
+export async function formatVolume(path: string, filesystem: string, label: string): Promise<string> {
+  return invoke<string>("format_drive", { path, filesystem, label });
+}
+
 export async function fetchDrives(): Promise<FsNode[]> {
   const drives = await invoke<RawEntry[]>("drives");
   return drives.map((entry) => {

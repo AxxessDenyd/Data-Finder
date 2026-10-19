@@ -380,6 +380,7 @@ function HomeRibbon() {
   const recent = useFiles((s) => s.recent);
   const nodes = useFiles((s) => s.nodes);
   const order = useFiles((s) => s.order);
+  const drive = driveOf({ nodes, order }, pathId);
   const infoCount = selected.length;
   const infoBytes = selected.reduce((sum, id) => sum + (nodes[id]?.bytes ?? 0), 0);
   const infoKnown = selected.every((id) => nodes[id]?.bytes != null);
@@ -432,9 +433,11 @@ function HomeRibbon() {
       <GroupBox title="Go">
         <RibbonButton label="Up" icon={<ArrowUp className="size-4" />} onClick={() => store().goUp()} />
         <RibbonButton label={desktop ? "This computer" : "Open folder"} icon={<HardDrive className="size-4" />} onClick={() => void store().openFolder()} />
-        <RibbonButton label="Unmount" icon={<Unplug className="size-4" />} disabled={!driveOf({ nodes, order }, pathId) || driveOf({ nodes, order }, pathId)?.mounted === false} onClick={() => {
-          const drive = driveOf(useFiles.getState(), useFiles.getState().panes[useFiles.getState().active].pathId);
-          if (drive) store().openDialog({ kind: "unmount", id: drive.id });
+        <RibbonButton label="Unmount" icon={<Unplug className="size-4" />} disabled={!drive || drive.mounted === false || drive.system} onClick={() => {
+          if (drive && !drive.system) store().openDialog({ kind: "unmount", id: drive.id });
+        }} />
+        <RibbonButton label="Format" icon={<Trash2 className="size-4" />} disabled={!drive || drive.mounted === false || drive.system || !drive.name.endsWith(":")} onClick={() => {
+          if (drive && !drive.system && drive.name.endsWith(":")) store().openDialog({ kind: "format", id: drive.id });
         }} />
         <RibbonButton label="Refresh" icon={<RefreshCw className="size-4" />} onClick={() => store().refresh()} />
         <RibbonButton label="Measure" icon={<Ruler className="size-4" />} onClick={() => void store().calcSizes()} />
@@ -1560,7 +1563,8 @@ function Dialogs() {
             </div>
           </div>
         )}
-        {dialog.kind === "unmount" && nodes[dialog.id] && (
+        {dialog.kind === "format" && <FormatDialog id={dialog.id} />}
+        {dialog.kind === "unmount" && nodes[dialog.id] && !nodes[dialog.id].system && (
           <div>
             <h2 className="text-base font-semibold">Unmount {driveCaption(nodes[dialog.id]) }?</h2>
             <p className="mt-2 text-sm text-muted">
@@ -1570,7 +1574,7 @@ function Dialogs() {
             </p>
             <div className="mt-3 flex justify-end gap-2">
               <button type="button" className="min-h-11 px-3" onClick={() => useFiles.getState().openDialog(null)}>Cancel</button>
-              <button type="button" className="min-h-11 bg-accent px-3 text-accent-ink" disabled={nodes[dialog.id].mounted === false} onClick={() => void useFiles.getState().unmountDrive(dialog.id)}>Unmount</button>
+              <button type="button" className="min-h-11 bg-accent px-3 text-accent-ink" onClick={() => void useFiles.getState().unmountDrive(dialog.id)}>Unmount</button>
             </div>
           </div>
         )}
@@ -1858,6 +1862,40 @@ function Props({ id }: { id: string }) {
   );
 }
 
+function FormatDialog({ id }: { id: string }) {
+  const node = useFiles((s) => s.nodes[id]);
+  const [filesystem, setFilesystem] = useState("NTFS");
+  const [label, setLabel] = useState(node?.label || node?.note || "");
+  if (!node || node.system) return null;
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        void useFiles.getState().formatDrive(id, filesystem, label);
+      }}
+    >
+      <h2 className="text-base font-semibold">Format {driveCaption(node)}?</h2>
+      <p className="mt-2 text-sm text-muted">Everything on this drive is erased. The Windows drive cannot be formatted.</p>
+      <label className="mt-3 block text-sm">
+        File system
+        <select value={filesystem} onChange={(e) => setFilesystem(e.target.value)} className="mt-1 h-11 w-full border border-line bg-pane px-2">
+          <option value="NTFS">NTFS</option>
+          <option value="exFAT">exFAT</option>
+          <option value="FAT32">FAT32</option>
+        </select>
+      </label>
+      <label className="mt-3 block text-sm">
+        Drive name
+        <input value={label} onChange={(e) => setLabel(e.target.value)} className="mt-1 h-11 w-full border border-line px-2 outline-none" aria-label="Drive name" />
+      </label>
+      <div className="mt-3 flex justify-end gap-2">
+        <button type="button" className="min-h-11 px-3" onClick={() => useFiles.getState().openDialog(null)}>Cancel</button>
+        <button type="submit" className="min-h-11 bg-danger px-3 text-accent-ink">Erase and format</button>
+      </div>
+    </form>
+  );
+}
+
 function ContextMenu() {
   const menu = useFiles((s) => s.menu);
   if (!menu) return null;
@@ -1893,7 +1931,9 @@ function ContextMenu() {
         {node && item("Rename", () => useFiles.getState().openDialog({ kind: "rename", id: node.id, name: node.name }))}
         {id && item("Delete", () => useFiles.getState().openDialog({ kind: "delete", ids: useFiles.getState().panes[useFiles.getState().active].selected.length ? useFiles.getState().panes[useFiles.getState().active].selected : [id] }))}
         {id && item("Info", () => useFiles.getState().openDialog({ kind: "props", id }))}
-        {node?.kind === "drive" && node.mounted !== false && item("Unmount", () => useFiles.getState().openDialog({ kind: "unmount", id: node.id }))}
+        {node?.kind === "file" && node.name.toLowerCase().endsWith(".iso") && item("Mount image", () => void useFiles.getState().mountImage(node.id))}
+        {node?.kind === "drive" && !node.system && node.mounted !== false && node.name.endsWith(":") && item("Format", () => useFiles.getState().openDialog({ kind: "format", id: node.id }))}
+        {node?.kind === "drive" && !node.system && node.mounted !== false && item("Unmount", () => useFiles.getState().openDialog({ kind: "unmount", id: node.id }))}
         {item("Copy location", () => {
           const state = useFiles.getState();
           void state.copyPath(id ?? state.panes[state.active].pathId);

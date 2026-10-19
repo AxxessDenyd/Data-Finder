@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { diskCreate, diskPath, diskRemoveNamed, diskRename, diskTransfer, fetchDrives, forgetDisk, isDesktop, isDiskId, loadChildren, loadDesktopComputer, measureChildren, pickFolder, readDiskText, setDiskPath, unmountVolume, type DiskJob } from "@/lib/disk";
+import { diskCreate, diskPath, diskRemoveNamed, diskRename, diskTransfer, fetchDrives, forgetDisk, formatVolume, isDesktop, isDiskId, loadChildren, loadDesktopComputer, measureChildren, mountImage, pickFolder, readDiskText, setDiskPath, unmountVolume, type DiskJob } from "@/lib/disk";
 import {
   childrenOf,
   cloneSubtree,
@@ -98,7 +98,8 @@ export type DialogState =
   | { kind: "operation" }
   | { kind: "mask" }
   | { kind: "restore" }
-  | { kind: "unmount"; id: string };
+  | { kind: "unmount"; id: string }
+  | { kind: "format"; id: string };
 
 export interface SearchRequest {
   query?: string;
@@ -405,6 +406,8 @@ interface Actions {
   openReader: (id: string | null) => void;
   openFolder: (index?: 0 | 1) => Promise<void>;
   unmountDrive: (id?: string) => Promise<void>;
+  mountImage: (id: string) => Promise<void>;
+  formatDrive: (id: string, filesystem: string, label: string) => Promise<void>;
   openTypedPath: (raw: string) => Promise<boolean>;
   hydrate: (prefs: UiPrefs) => void;
 }
@@ -618,6 +621,60 @@ async function reloadDiskFolder(id: string) {
       return { ...pane, pathId, selected: pane.selected.filter((item) => nodes[item]) };
     }) as [PaneModel, PaneModel];
     return { nodes, order, panes };
+  });
+}
+
+async function applyFreshDrives(message: string) {
+  const fresh = await fetchDrives();
+  useFiles.setState((current) => {
+    let nodes = { ...current.nodes };
+    let order = { ...current.order };
+    const oldIds = (order.pc ?? []).filter((item) => isDiskId(item) && nodes[item]?.kind === "drive");
+    const used = new Set<string>();
+    const kept: string[] = [];
+    for (const oldId of oldIds) {
+      const old = nodes[oldId];
+      const match = fresh.find((node) => !used.has(node.id) && node.name.toLowerCase() === old.name.toLowerCase());
+      if (!match) {
+        const cleaned = dropLoaded(nodes, order, oldId);
+        nodes = cleaned.nodes;
+        order = cleaned.order;
+        delete nodes[oldId];
+        forgetDisk(oldId);
+        continue;
+      }
+      used.add(match.id);
+      const nextPath = diskPath(match.id);
+      if (nextPath) setDiskPath(oldId, nextPath);
+      forgetDisk(match.id);
+      nodes[oldId] = {
+        ...old,
+        name: match.name,
+        mounted: match.mounted,
+        capacity: match.capacity,
+        free: match.free,
+        note: match.note,
+        label: match.label,
+        system: match.system,
+      };
+      kept.push(oldId);
+    }
+    for (const node of fresh) {
+      if (used.has(node.id)) continue;
+      nodes[node.id] = node;
+      kept.push(node.id);
+    }
+    order = { ...order, pc: kept };
+    const panes = current.panes.map((pane) => {
+      const pathId = nodes[pane.pathId] ? pane.pathId : "pc";
+      return {
+        ...pane,
+        pathId,
+        selected: pane.selected.filter((item) => nodes[item]),
+        anchor: pane.anchor && nodes[pane.anchor] ? pane.anchor : null,
+      };
+    }) as [PaneModel, PaneModel];
+    return { nodes, order, panes, dialog: null, clipboard: null, status: message };
   });
 }
 
@@ -1925,6 +1982,10 @@ export const useFiles = create<FileState & Actions>((set, get) => ({
       set({ status: `${drive.name} is already not mounted`, dialog: null });
       return;
     }
+    if (drive.system) {
+      set({ status: "The Windows drive stays mounted", dialog: null });
+      return;
+    }
     if (!isDiskId(drive.id)) {
       const nodes = { ...state.nodes, [drive.id]: { ...drive, mounted: false } };
       const panes = state.panes.map((pane) => {
@@ -1942,59 +2003,73 @@ export const useFiles = create<FileState & Actions>((set, get) => ({
     try {
       set({ status: `Unmounting ${drive.name}` });
       const message = await unmountVolume(path);
-      const fresh = await fetchDrives();
-      set((current) => {
-        let nodes = { ...current.nodes };
-        let order = { ...current.order };
-        const oldIds = (order.pc ?? []).filter((item) => isDiskId(item) && nodes[item]?.kind === "drive");
-        const used = new Set<string>();
-        const kept: string[] = [];
-        for (const oldId of oldIds) {
-          const old = nodes[oldId];
-          const match = fresh.find((node) => !used.has(node.id) && node.name.toLowerCase() === old.name.toLowerCase());
-          if (!match) {
-            const cleaned = dropLoaded(nodes, order, oldId);
-            nodes = cleaned.nodes;
-            order = cleaned.order;
-            delete nodes[oldId];
-            forgetDisk(oldId);
-            continue;
-          }
-          used.add(match.id);
-          const nextPath = diskPath(match.id);
-          if (nextPath) setDiskPath(oldId, nextPath);
-          forgetDisk(match.id);
-          nodes[oldId] = {
-            ...old,
-            name: match.name,
-            mounted: match.mounted,
-            capacity: match.capacity,
-            free: match.free,
-            note: match.note,
-            label: match.label,
-            system: match.system,
-          };
-          kept.push(oldId);
-        }
-        for (const node of fresh) {
-          if (used.has(node.id)) continue;
-          nodes[node.id] = node;
-          kept.push(node.id);
-        }
-        order = { ...order, pc: kept };
-        const panes = current.panes.map((pane) => {
-          const pathId = nodes[pane.pathId] ? pane.pathId : "pc";
-          return {
-            ...pane,
-            pathId,
-            selected: pane.selected.filter((item) => nodes[item]),
-            anchor: pane.anchor && nodes[pane.anchor] ? pane.anchor : null,
-          };
-        }) as [PaneModel, PaneModel];
-        return { nodes, order, panes, dialog: null, clipboard: null, status: message };
-      });
+      await applyFreshDrives(message);
     } catch (error) {
       set({ dialog: null, status: error instanceof Error ? error.message : "Could not unmount that drive" });
+    }
+  },
+
+  mountImage: async (id) => {
+    const node = get().nodes[id];
+    if (!node || node.kind !== "file" || !node.name.toLowerCase().endsWith(".iso")) {
+      set({ status: "Choose an ISO image" });
+      return;
+    }
+    if (!isDiskId(node.id)) {
+      set({ status: "Mount works on a real ISO in the Windows program" });
+      return;
+    }
+    const path = diskPath(node.id);
+    if (!path) {
+      set({ status: "That image is not open" });
+      return;
+    }
+    try {
+      set({ status: `Mounting ${node.name}` });
+      const message = await mountImage(path);
+      await applyFreshDrives(message);
+    } catch (error) {
+      set({ status: error instanceof Error ? error.message : "Could not mount that image" });
+    }
+  },
+
+  formatDrive: async (id, filesystem, label) => {
+    const drive = get().nodes[id];
+    if (!drive || drive.kind !== "drive") {
+      set({ status: "Select a drive to format" });
+      return;
+    }
+    if (drive.system || !drive.name.endsWith(":")) {
+      set({ status: "The Windows drive cannot be formatted", dialog: null });
+      return;
+    }
+    if (!isDiskId(drive.id)) {
+      set((state) => ({
+        nodes: { ...state.nodes, [drive.id]: { ...drive, label: label.trim() || drive.label, note: label.trim() || drive.note } },
+        dialog: null,
+        status: `${drive.name} label updated in the sample catalog`,
+      }));
+      return;
+    }
+    const path = diskPath(drive.id);
+    if (!path) {
+      set({ status: "That drive is not open" });
+      return;
+    }
+    try {
+      set({ status: `Formatting ${drive.name}` });
+      const message = await formatVolume(path, filesystem, label);
+      set((current) => {
+        const cleaned = dropLoaded(current.nodes, current.order, drive.id);
+        const panes = current.panes.map((pane) => {
+          const onDrive = pane.pathId === drive.id || driveOf(current, pane.pathId)?.id === drive.id;
+          return onDrive ? { ...pane, pathId: drive.id, selected: [] as string[], anchor: null } : pane;
+        }) as [PaneModel, PaneModel];
+        return { nodes: cleaned.nodes, order: { ...cleaned.order, [drive.id]: [] }, panes };
+      });
+      await applyFreshDrives(message);
+    } catch (error) {
+      set({ dialog: null, status: error instanceof Error ? error.message : "Could not format that drive" });
     }
   },
 
