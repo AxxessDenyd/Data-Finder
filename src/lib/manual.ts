@@ -41,8 +41,10 @@ export const manualSections: ManualSection[] = [
     title: "The window",
     items: [
       "The app opens in one pane. The folder tree is on the left and the file list is on the right.",
-      "Home, Find, Analyze, View, and Help are the tabs across the top. Help has two buttons: Manual opens this guide, and About tells you who made Data Finder and where the latest copy is.",
-      "Home is one row of menus: Hold, Edit, Go, View, Details, Shortcuts, and Layout. Click a name to open its list. The list opens over the window, not inside the bar.",
+      "Help has Manual, About, and a search box. Search narrows the manual to the matching sections.",
+      "New creates a folder or a file. The list includes a text document, markdown, spreadsheet, web page, JSON, settings, PowerShell, batch, log, and an empty file. If the name is already there, a number is added.",
+      "Filter sorts by name, size, date, or type. Click the same sort again to reverse it. It can also show folders, files, documents, pictures, music, videos, programs, archives, or items of 100 MB and up, and limit them to today, the past week, or the past month.",
+      "Drag across empty space, or across items that are not already selected, to draw a box and select every file and folder inside it. Drag an item that is already selected to move it.",
       "The address bar shows the path. Click it to type a path such as C:\\Users.",
       "The bottom bar shows how many items are selected, a Details button, and the drive name, mount state, and free space.",
       "Select one or more files and folders, then open Details. Each item is listed with its type and size. Each folder also lists what is inside it, grouped by type. The top line adds every selected size into one total.",
@@ -51,10 +53,12 @@ export const manualSections: ManualSection[] = [
   {
     title: "Home menus",
     items: [
+      "New: folder and the file types Data Finder can create.",
       "Hold: Cut, Copy, and Paste.",
       "Edit: Open, Delete, Rename, Undo, New folder, and New file.",
       "Go: Up, This computer, Unmount, Format, Refresh, Measure, and the size-bar style.",
       "View: icon sizes, List, Details, Tiles, Content, the details pane, the preview pane, and the Show list.",
+      "Filter: sort order, file kind, and how recently an item changed.",
       "Details: how many items are selected, Show details, Copy location, and Info.",
       "Shortcuts: Starred places and folders you opened recently.",
       "Layout: switch between one and two panes, compare folders, the queue, the activity log, and this manual.",

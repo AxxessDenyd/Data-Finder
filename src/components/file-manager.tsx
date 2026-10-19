@@ -510,6 +510,67 @@ function Ribbon() {
   );
 }
 
+const dragSelect = { moved: false };
+
+function freshName(base: string) {
+  const state = useFiles.getState();
+  const parent = state.panes[state.active].pathId;
+  const names = new Set((state.order[parent] ?? []).map((id) => state.nodes[id]?.name.toLowerCase()));
+  if (!names.has(base.toLowerCase())) return base;
+  const dot = base.lastIndexOf(".");
+  const stem = dot > 0 ? base.slice(0, dot) : base;
+  const ext = dot > 0 ? base.slice(dot) : "";
+  let n = 2;
+  while (names.has(`${stem} (${n})${ext}`.toLowerCase())) n += 1;
+  return `${stem} (${n})${ext}`;
+}
+
+function FilterMenu() {
+  const active = useFiles((s) => s.active);
+  const sortKey = useFiles((s) => s.panes[s.active].sortKey);
+  const sortDir = useFiles((s) => s.panes[s.active].sortDir);
+  const filters = useFiles((s) => s.filters);
+  const set = useFiles.getState().setFilters;
+  const sort = (key: "name" | "size" | "date" | "type", label: string) => (
+    <MenuAction
+      label={`${sortKey === key ? "✓ " : ""}${label}${sortKey === key ? (sortDir === "asc" ? " ↑" : " ↓") : ""}`}
+      onClick={() => useFiles.getState().setSort(active, key)}
+    />
+  );
+  const narrow = (label: string, on: boolean, patch: Partial<typeof filters>) => (
+    <MenuAction label={`${on ? "✓ " : ""}${label}`} onClick={() => set({ kind: "all", group: "", ext: "", minBytes: 0, ...patch })} />
+  );
+  return (
+    <SectionMenu label="Filter">
+      <p className="px-2 py-1 text-xs text-muted">Sort</p>
+      {sort("name", "Name")}
+      {sort("size", "Size")}
+      {sort("date", "Date modified")}
+      {sort("type", "Type")}
+      <div className="my-1 h-px bg-line" />
+      <p className="px-2 py-1 text-xs text-muted">Show</p>
+      {narrow("Everything", filters.kind === "all" && !filters.group && !filters.minBytes, {})}
+      {narrow("Folders", filters.kind === "dir", { kind: "dir" })}
+      {narrow("Files", filters.kind === "file" && !filters.group && !filters.minBytes, { kind: "file" })}
+      {narrow("Documents", filters.group === "docs", { kind: "file", group: "docs" })}
+      {narrow("Pictures", filters.group === "images", { kind: "file", group: "images" })}
+      {narrow("Music", filters.group === "audio", { kind: "file", group: "audio" })}
+      {narrow("Videos", filters.group === "video", { kind: "file", group: "video" })}
+      {narrow("Programs", filters.group === "programs", { kind: "file", group: "programs" })}
+      {narrow("Archives", filters.group === "archives", { kind: "file", group: "archives" })}
+      {narrow("100 MB and up", filters.minBytes > 0, { kind: "file", minBytes: 100 * MB })}
+      <div className="my-1 h-px bg-line" />
+      <p className="px-2 py-1 text-xs text-muted">Changed</p>
+      <MenuAction label={`${filters.maxAgeDays === 0 ? "✓ " : ""}Any time`} onClick={() => set({ maxAgeDays: 0 })} />
+      <MenuAction label={`${filters.maxAgeDays === 1 ? "✓ " : ""}Today`} onClick={() => set({ maxAgeDays: 1 })} />
+      <MenuAction label={`${filters.maxAgeDays === 7 ? "✓ " : ""}Past week`} onClick={() => set({ maxAgeDays: 7 })} />
+      <MenuAction label={`${filters.maxAgeDays === 30 ? "✓ " : ""}Past month`} onClick={() => set({ maxAgeDays: 30 })} />
+      <div className="my-1 h-px bg-line" />
+      <MenuAction label="Clear filters" icon={<X className="size-4" />} onClick={() => useFiles.getState().clearFilters()} />
+    </SectionMenu>
+  );
+}
+
 function HomeRibbon() {
   const active = useFiles((s) => s.active);
   const split = useFiles((s) => s.split);
@@ -532,6 +593,19 @@ function HomeRibbon() {
 
   return (
     <div className="flex flex-wrap items-center gap-1 px-2 py-1">
+      <SectionMenu label="New">
+        <MenuAction label="Folder" icon={<FolderPlus className="size-4" />} onClick={() => store().newItem(freshName("New folder"), false)} />
+        <MenuAction label="Text document" icon={<FileText className="size-4" />} onClick={() => store().newItem(freshName("New Text Document.txt"), true)} />
+        <MenuAction label="Markdown" icon={<FileText className="size-4" />} onClick={() => store().newItem(freshName("Notes.md"), true)} />
+        <MenuAction label="Spreadsheet" icon={<Table className="size-4" />} onClick={() => store().newItem(freshName("Sheet.csv"), true)} />
+        <MenuAction label="Web page" icon={<FileCode className="size-4" />} onClick={() => store().newItem(freshName("Page.html"), true)} />
+        <MenuAction label="JSON" icon={<FileCode className="size-4" />} onClick={() => store().newItem(freshName("Data.json"), true)} />
+        <MenuAction label="Settings" icon={<File className="size-4" />} onClick={() => store().newItem(freshName("Settings.ini"), true)} />
+        <MenuAction label="PowerShell script" icon={<FileCode className="size-4" />} onClick={() => store().newItem(freshName("Script.ps1"), true)} />
+        <MenuAction label="Batch file" icon={<AppWindow className="size-4" />} onClick={() => store().newItem(freshName("Script.bat"), true)} />
+        <MenuAction label="Log" icon={<FileText className="size-4" />} onClick={() => store().newItem(freshName("Log.log"), true)} />
+        <MenuAction label="Empty file" icon={<FilePlus className="size-4" />} onClick={() => store().newItem(freshName("New file"), true)} />
+      </SectionMenu>
       <SectionMenu label="Hold">
         <MenuAction label="Cut" disabled={!selected.length} icon={<Scissors className="size-4" />} onClick={() => store().cut()} />
         <MenuAction label="Copy" disabled={!selected.length} icon={<Copy className="size-4" />} onClick={() => store().copy()} />
@@ -562,6 +636,7 @@ function HomeRibbon() {
         <MenuAction label={barMode === "log" ? "Compressed bars" : "Even bars"} icon={<Scale className="size-4" />} onClick={() => store().toggleBarMode()} />
       </SectionMenu>
       <ViewMenu />
+      <FilterMenu />
       <SectionMenu label="Details">
         <p className="px-2 py-1 text-xs text-muted">
           {infoCount ? `${infoCount} selected${infoKnown ? ` · ${formatSize(infoBytes)}` : ""}` : "Nothing selected"}
@@ -783,22 +858,40 @@ function OptionsRibbon() {
 
 function ResourcesRibbon() {
   const page = useFiles((s) => s.helpPage);
+  const query = useFiles((s) => s.helpQuery);
   const go = (helpPage: "manual" | "about") => useFiles.getState().setHelpPage(helpPage);
   return (
     <div className="flex items-center gap-1 px-2 py-1">
       <button type="button" className={"h-8 rounded-md px-3 text-sm " + (page === "manual" ? "bg-select" : "hover:bg-header")} onClick={() => go("manual")}>Manual</button>
       <button type="button" className={"h-8 rounded-md px-3 text-sm " + (page === "about" ? "bg-select" : "hover:bg-header")} onClick={() => go("about")}>About</button>
+      <input
+        value={query}
+        onChange={(e) => useFiles.getState().setHelpQuery(e.target.value)}
+        placeholder="Search the manual"
+        aria-label="Search the manual"
+        className="h-8 w-56 rounded-md border border-line bg-pane px-2 text-sm outline-none"
+      />
     </div>
   );
 }
 
 function ManualPage() {
+  const query = useFiles((s) => s.helpQuery).trim().toLowerCase();
+  const sections = manualSections.flatMap((section) => {
+    if (!query) return [section];
+    if (section.title.toLowerCase().includes(query)) return [section];
+    const paragraphs = section.paragraphs?.filter((text) => text.toLowerCase().includes(query));
+    const items = section.items?.filter((text) => text.toLowerCase().includes(query));
+    const links = section.links?.filter((link) => link.label.toLowerCase().includes(query));
+    if (!paragraphs?.length && !items?.length && !links?.length) return [];
+    return [{ ...section, paragraphs, items, links }];
+  });
   return (
     <div className="flex min-h-0 flex-1 bg-pane">
       <nav className="hidden w-52 shrink-0 overflow-auto border-r border-line bg-tree p-3 sm:block">
         <p className="px-2 text-xs font-semibold text-muted">Contents</p>
         <ul className="mt-2 space-y-1">
-          {manualSections.map((section) => (
+          {sections.map((section) => (
             <li key={section.title}>
               <a href={`#manual-${section.title}`} className="block rounded-md px-2 py-1 text-sm hover:bg-select">{section.title}</a>
             </li>
@@ -808,7 +901,8 @@ function ManualPage() {
       <article className="min-h-0 flex-1 overflow-auto px-6 py-5">
         <h2 className="text-lg font-semibold">Manual</h2>
         <div className="mt-4 max-w-3xl space-y-6">
-          {manualSections.map((section) => (
+          {sections.length === 0 && <p className="text-sm text-muted">Nothing in the manual matches that search.</p>}
+          {sections.map((section) => (
             <section key={section.title} id={`manual-${section.title}`}>
               <h3 className="text-sm font-semibold">{section.title}</h3>
               {section.paragraphs?.map((text) => (
@@ -976,6 +1070,10 @@ function IconBoard({ index, rows, mode }: { index: 0 | 1; rows: ListRow[]; mode:
               (cut ? " opacity-50" : "")
             }
             onClick={(e) => {
+              if (dragSelect.moved) {
+                dragSelect.moved = false;
+                return;
+              }
               const ids = rows.map((item) => item.id);
               if (e.shiftKey) useFiles.getState().selectRange(index, row.id, ids);
               else if (e.metaKey || e.ctrlKey) useFiles.getState().toggleSelect(index, row.id);
@@ -1041,6 +1139,7 @@ function PaneView({ index }: { index: 0 | 1 }) {
   const [draft, setDraft] = useState("");
   const [places, setPlaces] = useState(false);
   const [over, setOver] = useState(false);
+  const [band, setBand] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
   const snap = { nodes, order };
   const drive = driveOf(snap, pane.pathId);
   const freePct = drive?.capacity ? Math.round(((drive.free ?? 0) / drive.capacity) * 100) : 0;
@@ -1164,13 +1263,50 @@ function PaneView({ index }: { index: 0 | 1 }) {
         </aside>
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <div
-          className="min-h-0 min-w-0 flex-1 overflow-auto"
+          className="relative min-h-0 min-w-0 flex-1 overflow-auto"
+          onPointerDown={(event) => {
+            if (event.button !== 0) return;
+            const target = event.target as HTMLElement;
+            if (target.closest("th, input, a")) return;
+            const rowId = target.closest("[data-row]")?.getAttribute("data-row") ?? "";
+            if (rowId && pane.selected.includes(rowId)) return;
+            const startX = event.clientX;
+            const startY = event.clientY;
+            dragSelect.moved = false;
+            const pick = (ev: PointerEvent) => {
+              const x = Math.min(startX, ev.clientX);
+              const y = Math.min(startY, ev.clientY);
+              const w = Math.abs(ev.clientX - startX);
+              const h = Math.abs(ev.clientY - startY);
+              if (w + h < 6) return;
+              dragSelect.moved = true;
+              setBand({ x, y, w, h });
+              const hits: string[] = [];
+              document.querySelectorAll(`[data-pane="${index}"] [data-row]`).forEach((el) => {
+                const rect = el.getBoundingClientRect();
+                const id = el.getAttribute("data-row");
+                if (!id) return;
+                if (rect.left < x + w && rect.right > x && rect.top < y + h && rect.bottom > y) hits.push(id);
+              });
+              useFiles.getState().selectIds(index, hits);
+            };
+            const end = () => {
+              setBand(null);
+              window.removeEventListener("pointermove", pick);
+              window.removeEventListener("pointerup", end);
+              window.removeEventListener("pointercancel", end);
+            };
+            window.addEventListener("pointermove", pick);
+            window.addEventListener("pointerup", end);
+            window.addEventListener("pointercancel", end);
+          }}
           onContextMenu={(e) => {
             e.preventDefault();
             useFiles.getState().setActive(index);
             useFiles.getState().openMenu({ x: e.clientX, y: e.clientY, id: null });
           }}
         >
+          {band && <div className="pointer-events-none fixed z-50 border border-accent bg-accent/20" style={{ left: band.x, top: band.y, width: band.w, height: band.h }} />}
           {state.viewMode === "details" ? (
           <table
             className={"table-fixed border-collapse text-left " + (state.reading ? "text-base" : "text-sm")}
@@ -1207,6 +1343,10 @@ function PaneView({ index }: { index: 0 | 1 }) {
                       (cut ? " opacity-50" : "")
                     }
                     onClick={(e) => {
+                      if (dragSelect.moved) {
+                        dragSelect.moved = false;
+                        return;
+                      }
                       const ids = view.rows.map((item) => item.id);
                       if (e.shiftKey) useFiles.getState().selectRange(index, row.id, ids);
                       else if (e.metaKey || e.ctrlKey) useFiles.getState().toggleSelect(index, row.id);
@@ -1214,7 +1354,10 @@ function PaneView({ index }: { index: 0 | 1 }) {
                     }}
                     onDoubleClick={() => openRow(row)}
                     onDragStart={(e) => {
-                      if (!row.nodeId) return;
+                      if (dragSelect.moved || !row.nodeId) {
+                        e.preventDefault();
+                        return;
+                      }
                       const ids = pane.selected.includes(row.nodeId) ? pane.selected : [row.nodeId];
                       e.dataTransfer.setData("text/plain", ids.join("\n"));
                       e.dataTransfer.effectAllowed = "copyMove";

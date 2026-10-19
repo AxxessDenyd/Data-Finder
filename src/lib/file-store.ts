@@ -77,7 +77,7 @@ export type BarMode = "linear" | "log";
 export type FindColumn = "name" | "size" | "type" | "date";
 export type DateFormat = "mdy" | "ymd" | "dmy";
 export type TimeFormat = "12" | "24" | "none";
-export type FilterGroup = "" | "docs" | "programs" | "images";
+export type FilterGroup = "" | "docs" | "programs" | "images" | "audio" | "video" | "archives";
 export type ConflictPolicy = "old" | "overwrite" | "newer" | "skip" | "alongside";
 export type TransferStatus = "Running" | "Succeeded" | "Aborted" | "Paused" | "Ignored";
 
@@ -146,6 +146,7 @@ export interface Filters {
   ext: string;
   attr: "any" | "h" | "r" | "s";
   minBytes: number;
+  maxAgeDays: number;
   findColumn: FindColumn;
   exclude: string;
   highlight: boolean;
@@ -258,6 +259,7 @@ interface FileState extends FsSnapshot {
   previewOpen: boolean;
   uiRev: number;
   helpPage: "manual" | "about";
+  helpQuery: string;
   readerId: string | null;
 }
 
@@ -269,6 +271,7 @@ const defaultFilters: Filters = {
   ext: "",
   attr: "any",
   minBytes: 0,
+  maxAgeDays: 0,
   findColumn: "name",
   exclude: "",
   highlight: false,
@@ -362,6 +365,7 @@ interface Actions {
   setActive: (index: 0 | 1) => void;
   setTab: (tab: RibbonTab) => void;
   setHelpPage: (page: "manual" | "about") => void;
+  setHelpQuery: (query: string) => void;
   toggleSplit: () => void;
   toggleDiff: () => void;
   toggleDupes: () => void;
@@ -380,6 +384,7 @@ interface Actions {
   selectOnly: (index: 0 | 1, id: string) => void;
   toggleSelect: (index: 0 | 1, id: string) => void;
   selectRange: (index: 0 | 1, id: string, visible: string[]) => void;
+  selectIds: (index: 0 | 1, ids: string[]) => void;
   selectAll: (index: 0 | 1, visible: string[]) => void;
   invertSelection: (index: 0 | 1, visible: string[]) => void;
   moveSelection: (index: 0 | 1, dir: 1 | -1, visible: string[]) => void;
@@ -748,12 +753,14 @@ export const useFiles = create<FileState & Actions>((set, get) => ({
   previewOpen: false,
   uiRev: 3,
   helpPage: "manual",
+  helpQuery: "",
   snaps: [],
   readerId: null,
 
   setActive: (index) => set({ active: index }),
   setTab: (tab) => set({ tab }),
   setHelpPage: (helpPage) => set({ helpPage }),
+  setHelpQuery: (helpQuery) => set({ helpQuery, helpPage: "manual" }),
   toggleSplit: () =>
     set((state) => {
       const split = !state.split;
@@ -933,6 +940,13 @@ export const useFiles = create<FileState & Actions>((set, get) => ({
       const [from, to] = a < b ? [a, b] : [b, a];
       const selected = a < 0 || b < 0 ? [id] : visible.slice(from, to + 1);
       panes[index] = { ...panes[index], selected, anchor };
+      return { panes, active: index };
+    }),
+
+  selectIds: (index, ids) =>
+    set((state) => {
+      const panes = [...state.panes] as [PaneModel, PaneModel];
+      panes[index] = { ...panes[index], selected: ids, anchor: ids[0] ?? panes[index].anchor };
       return { panes, active: index };
     }),
 
@@ -2407,9 +2421,12 @@ function inGroup(name: string, kind: FsNode["kind"], group: FilterGroup) {
   if (!group) return true;
   if (kind !== "file") return false;
   const ext = name.includes(".") ? name.split(".").pop()!.toLowerCase() : "";
-  if (group === "docs") return ["txt", "pdf", "docx", "csv", "log", "xlsx"].includes(ext);
-  if (group === "programs") return ["exe", "dll", "msi", "sys"].includes(ext);
-  return ["jpg", "jpeg", "png", "gif", "webp"].includes(ext);
+  if (group === "docs") return ["txt", "md", "pdf", "doc", "docx", "rtf", "csv", "log", "xls", "xlsx"].includes(ext);
+  if (group === "programs") return ["exe", "msi", "bat", "cmd", "ps1"].includes(ext);
+  if (group === "audio") return ["mp3", "wav", "flac", "aac", "ogg", "m4a"].includes(ext);
+  if (group === "video") return ["mp4", "mkv", "avi", "mov", "wmv", "webm"].includes(ext);
+  if (group === "archives") return ["zip", "rar", "7z", "iso", "cab", "tar", "gz"].includes(ext);
+  return ["jpg", "jpeg", "png", "gif", "webp", "bmp", "svg", "ico"].includes(ext);
 }
 
 function normalizeFilters(raw: Partial<Filters> & { visibility?: Visibility }): Filters {
@@ -2445,7 +2462,7 @@ function normalizeFilters(raw: Partial<Filters> & { visibility?: Visibility }): 
       showSystem = true;
     }
   }
-  return { ...defaultFilters, ...raw, showHidden, showReadonly, showSystem, attr: "any" };
+  return { ...defaultFilters, ...raw, showHidden, showReadonly, showSystem, maxAgeDays: raw.maxAgeDays ?? 0, attr: "any" };
 }
 
 function passes(
@@ -2463,6 +2480,7 @@ function passes(
   }
   if (!inGroup(row.name, row.kind, filters.group)) return false;
   if (filters.minBytes > 0 && (row.bytes ?? 0) < filters.minBytes) return false;
+  if (filters.maxAgeDays > 0 && Date.now() - row.modified > filters.maxAgeDays * 86_400_000) return false;
   if (filters.exclude) {
     const token = filters.exclude.toLowerCase();
     const ext = row.name.includes(".") ? `.${row.name.split(".").pop()!.toLowerCase()}` : "";

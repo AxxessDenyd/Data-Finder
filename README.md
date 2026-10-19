@@ -9,13 +9,19 @@ Close Data Finder before you replace a file that is already open.
 - [Data-Finder-Setup.exe](https://github.com/AxxessDenyd/Data-Finder/raw/main/Data-Finder-Setup.exe) installs the program for the current Windows user.
 - [Data-Finder.exe](https://github.com/AxxessDenyd/Data-Finder/raw/main/Data-Finder.exe) is portable. Copy it to a flash drive and double-click it. Nothing is installed.
 
-The same guide is inside the program. Open the Help tab, then Manual. About names the author, the date it was created, and where the latest copy is.
+The same guide is inside the program. Open the Help tab, then Manual. Search the manual from the box on that tab. About names the author, the date it was created, and where the latest copy is.
 
 ## The window
 
 The program opens in one pane. The folder tree is on the left and the file list is on the right. Home, Find, Analyze, View, and Help are the tabs.
 
-Home is one row of menus: Hold, Edit, Go, View, Details, Shortcuts, and Layout. Click a name and the list opens over the window.
+Home is one row of menus: New, Hold, Edit, Go, View, Filter, Details, Shortcuts, and Layout. Click a name and the list opens over the window.
+
+New creates a folder or a file of a chosen type: text, markdown, spreadsheet, web page, JSON, settings, PowerShell, batch, log, or an empty file.
+
+Filter sorts by name, size, date modified, or type. Click the same sort again to flip the order. It can show folders, files, documents, pictures, music, videos, programs, archives, or items of 100 MB and up, and limit them to today, the past week, or the past month.
+
+Drag across the list to draw a box and select every file and folder inside it. Drag an item that is already selected to move it.
 
 The bottom bar shows the selection count, a Details button, and the drive name, mount state, and free space. The details strip starts closed. Click Details on the bottom bar to open it.
 
@@ -23,10 +29,12 @@ Select several files and folders, then open Details. Each item is listed with it
 
 ## Home menus
 
+- **New:** a folder or a file of a chosen type.
 - **Hold:** Cut, Copy, and Paste.
 - **Edit:** Open, Delete, Rename, Undo, New folder, and New file.
 - **Go:** Up, This computer, Unmount, Format, Refresh, Measure, and the size-bar style.
 - **View:** icon sizes, List, Details, Tiles, Content, the details pane, the preview pane, and the Show list.
+- **Filter:** sort order, file kind, and how recently an item changed.
 - **Details:** the selection summary, Show details, Copy location, and Info.
 - **Shortcuts:** starred places and recent folders.
 - **Layout:** one or two panes, folder compare, the queue, the activity log, and the manual.
