@@ -257,6 +257,7 @@ interface FileState extends FsSnapshot {
   showExt: boolean;
   previewOpen: boolean;
   uiRev: number;
+  helpPage: "manual" | "about";
   readerId: string | null;
 }
 
@@ -360,6 +361,7 @@ export interface CatalogSnap {
 interface Actions {
   setActive: (index: 0 | 1) => void;
   setTab: (tab: RibbonTab) => void;
+  setHelpPage: (page: "manual" | "about") => void;
   toggleSplit: () => void;
   toggleDiff: () => void;
   toggleDupes: () => void;
@@ -745,11 +747,13 @@ export const useFiles = create<FileState & Actions>((set, get) => ({
   showExt: true,
   previewOpen: false,
   uiRev: 3,
+  helpPage: "manual",
   snaps: [],
   readerId: null,
 
   setActive: (index) => set({ active: index }),
   setTab: (tab) => set({ tab }),
+  setHelpPage: (helpPage) => set({ helpPage }),
   toggleSplit: () =>
     set((state) => {
       const split = !state.split;

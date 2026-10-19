@@ -9,7 +9,7 @@ Close Data Finder before you replace a file that is already open.
 - [Data-Finder-Setup.exe](https://github.com/AxxessDenyd/Data-Finder/raw/main/Data-Finder-Setup.exe) installs the program for the current Windows user.
 - [Data-Finder.exe](https://github.com/AxxessDenyd/Data-Finder/raw/main/Data-Finder.exe) is portable. Copy it to a flash drive and double-click it. Nothing is installed.
 
-The same guide is inside the program on the Help tab.
+The same guide is inside the program. Open the Help tab, then Manual. About names the author, the date it was created, and where the latest copy is.
 
 ## The window
 
@@ -18,6 +18,8 @@ The program opens in one pane. The folder tree is on the left and the file list 
 Home is one row of menus: Hold, Edit, Go, View, Details, Shortcuts, and Layout. Click a name and the list opens over the window.
 
 The bottom bar shows the selection count, a Details button, and the drive name, mount state, and free space. The details strip starts closed. Click Details on the bottom bar to open it.
+
+Select several files and folders, then open Details. Each item is listed with its type and size. Each folder also shows what is inside it, grouped by type. The top line adds those sizes into one total.
 
 ## Home menus
 

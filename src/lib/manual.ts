@@ -2,7 +2,19 @@ export interface ManualSection {
   title: string;
   paragraphs?: string[];
   items?: string[];
+  links?: Array<{ label: string; href: string }>;
 }
+
+export const aboutInfo = {
+  name: "Data Finder",
+  created: "October 2026",
+  author: "William Schneider",
+  updated: "October 18, 2026",
+  version: "0.1.0",
+  latest: "https://github.com/AxxessDenyd/Data-Finder",
+  setup: "https://github.com/AxxessDenyd/Data-Finder/raw/main/Data-Finder-Setup.exe",
+  portable: "https://github.com/AxxessDenyd/Data-Finder/raw/main/Data-Finder.exe",
+};
 
 export const manualSections: ManualSection[] = [
   {
@@ -17,16 +29,23 @@ export const manualSections: ManualSection[] = [
       "Data-Finder-Setup.exe installs Data Finder for the current Windows user. Double-click it and follow the steps.",
       "Data-Finder.exe is the portable program. Copy it to a flash drive and double-click it on any Windows PC. Nothing is installed.",
       "Close Data Finder before replacing either file, or Windows will say the file is in use.",
+      "The latest copies are on the project page. Use the links below.",
+    ],
+    links: [
+      { label: "Download the installer", href: "https://github.com/AxxessDenyd/Data-Finder/raw/main/Data-Finder-Setup.exe" },
+      { label: "Download the portable program", href: "https://github.com/AxxessDenyd/Data-Finder/raw/main/Data-Finder.exe" },
+      { label: "Project page", href: "https://github.com/AxxessDenyd/Data-Finder" },
     ],
   },
   {
     title: "The window",
     items: [
       "The app opens in one pane. The folder tree is on the left and the file list is on the right.",
-      "Home, Find, Analyze, View, and Help are the tabs across the top.",
+      "Home, Find, Analyze, View, and Help are the tabs across the top. Help has two buttons: Manual opens this guide, and About tells you who made Data Finder and where the latest copy is.",
       "Home is one row of menus: Hold, Edit, Go, View, Details, Shortcuts, and Layout. Click a name to open its list. The list opens over the window, not inside the bar.",
       "The address bar shows the path. Click it to type a path such as C:\\Users.",
       "The bottom bar shows how many items are selected, a Details button, and the drive name, mount state, and free space.",
+      "Select one or more files and folders, then open Details. Each item is listed with its type and size. Each folder also lists what is inside it, grouped by type. The top line adds every selected size into one total.",
     ],
   },
   {

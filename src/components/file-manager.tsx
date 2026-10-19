@@ -74,7 +74,7 @@ import {
 } from "@/lib/file-store";
 import { childrenOf, driveCaption, formatDate, formatSize, pathIds, resolvePath, typeLabel, type FsNode } from "@/lib/vfs";
 import { diskPath, isDesktop, isDiskId, withoutDisk } from "@/lib/disk";
-import { manualSections } from "@/lib/manual";
+import { aboutInfo, manualSections } from "@/lib/manual";
 
 const UI_KEY = "data-finder-ui";
 const CATALOG_KEY = "data-finder-catalog";
@@ -782,34 +782,80 @@ function OptionsRibbon() {
 }
 
 function ResourcesRibbon() {
+  const page = useFiles((s) => s.helpPage);
+  const go = (helpPage: "manual" | "about") => useFiles.getState().setHelpPage(helpPage);
   return (
     <div className="flex items-center gap-1 px-2 py-1">
-      <p className="px-2 text-sm text-muted">The manual below matches the current program.</p>
+      <button type="button" className={"h-8 rounded-md px-3 text-sm " + (page === "manual" ? "bg-select" : "hover:bg-header")} onClick={() => go("manual")}>Manual</button>
+      <button type="button" className={"h-8 rounded-md px-3 text-sm " + (page === "about" ? "bg-select" : "hover:bg-header")} onClick={() => go("about")}>About</button>
     </div>
   );
 }
 
 function ManualPage() {
   return (
+    <div className="flex min-h-0 flex-1 bg-pane">
+      <nav className="hidden w-52 shrink-0 overflow-auto border-r border-line bg-tree p-3 sm:block">
+        <p className="px-2 text-xs font-semibold text-muted">Contents</p>
+        <ul className="mt-2 space-y-1">
+          {manualSections.map((section) => (
+            <li key={section.title}>
+              <a href={`#manual-${section.title}`} className="block rounded-md px-2 py-1 text-sm hover:bg-select">{section.title}</a>
+            </li>
+          ))}
+        </ul>
+      </nav>
+      <article className="min-h-0 flex-1 overflow-auto px-6 py-5">
+        <h2 className="text-lg font-semibold">Manual</h2>
+        <div className="mt-4 max-w-3xl space-y-6">
+          {manualSections.map((section) => (
+            <section key={section.title} id={`manual-${section.title}`}>
+              <h3 className="text-sm font-semibold">{section.title}</h3>
+              {section.paragraphs?.map((text) => (
+                <p key={text} className="mt-1 text-sm text-muted">{text}</p>
+              ))}
+              {section.items && (
+                <ul className="mt-1 list-disc space-y-1 pl-5 text-sm">
+                  {section.items.map((item) => (
+                    <li key={item}>{item}</li>
+                  ))}
+                </ul>
+              )}
+              {section.links && (
+                <ul className="mt-2 space-y-1 text-sm">
+                  {section.links.map((link) => (
+                    <li key={link.href}>
+                      <a href={link.href} target="_blank" rel="noreferrer" className="text-accent underline">{link.label}</a>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          ))}
+        </div>
+      </article>
+    </div>
+  );
+}
+
+function AboutPage() {
+  return (
     <article className="min-h-0 flex-1 overflow-auto bg-pane px-6 py-5">
-      <h2 className="text-lg font-semibold">Data Finder manual</h2>
-      <div className="mt-4 max-w-3xl space-y-5">
-        {manualSections.map((section) => (
-          <section key={section.title}>
-            <h3 className="text-sm font-semibold">{section.title}</h3>
-            {section.paragraphs?.map((text) => (
-              <p key={text} className="mt-1 text-sm text-muted">{text}</p>
-            ))}
-            {section.items && (
-              <ul className="mt-1 list-disc space-y-1 pl-5 text-sm">
-                {section.items.map((item) => (
-                  <li key={item}>{item}</li>
-                ))}
-              </ul>
-            )}
-          </section>
-        ))}
-      </div>
+      <h2 className="text-lg font-semibold">About {aboutInfo.name}</h2>
+      <dl className="mt-4 max-w-xl space-y-3 text-sm">
+        <div><dt className="text-muted">Created</dt><dd>{aboutInfo.created}</dd></div>
+        <div><dt className="text-muted">Created by</dt><dd>{aboutInfo.author}</dd></div>
+        <div><dt className="text-muted">Version</dt><dd>{aboutInfo.version}</dd></div>
+        <div><dt className="text-muted">This copy updated</dt><dd>{aboutInfo.updated}</dd></div>
+        <div>
+          <dt className="text-muted">Latest version</dt>
+          <dd className="mt-1 space-y-1">
+            <a href={aboutInfo.latest} target="_blank" rel="noreferrer" className="block text-accent underline">Project page</a>
+            <a href={aboutInfo.setup} target="_blank" rel="noreferrer" className="block text-accent underline">Data-Finder-Setup.exe</a>
+            <a href={aboutInfo.portable} target="_blank" rel="noreferrer" className="block text-accent underline">Data-Finder.exe</a>
+          </dd>
+        </div>
+      </dl>
     </article>
   );
 }
@@ -1311,11 +1357,27 @@ function DetailsStrip({ index, compact = false, className = "" }: { index: 0 | 1
   const id = picked ?? pane.pathId;
   const node = nodes[id];
   if (!node) return null;
-  const extra = pane.selected.length > 1 ? ` +${pane.selected.length - 1}` : "";
+  const chosen = pane.selected.map((item) => nodes[item]).filter((item): item is FsNode => Boolean(item));
+  const items = chosen.length ? chosen : [node];
+  const total = items.reduce((sum, item) => sum + (item.bytes ?? 0), 0);
+  const unknown = items.some((item) => item.bytes == null);
+  const approx = items.some((item) => item.approx);
+  const makeup = (folderId: string) => {
+    const groups = new Map<string, { count: number; bytes: number; missing: boolean }>();
+    for (const child of (order[folderId] ?? []).map((item) => nodes[item]).filter((item): item is FsNode => Boolean(item))) {
+      const label = typeLabel(child);
+      const group = groups.get(label) ?? { count: 0, bytes: 0, missing: false };
+      group.count += 1;
+      if (child.bytes == null) group.missing = true;
+      else group.bytes += child.bytes;
+      groups.set(label, group);
+    }
+    return [...groups.entries()];
+  };
   const flags = [node.hidden && "Hidden", node.readonly && "Read-only", node.system && "System"].filter(Boolean).join(", ") || "Normal";
-  const place = displayPath({ nodes, order }, id);
+  const place = displayPath({ nodes, order }, items.length === 1 ? items[0].id : id);
   const note = node.note?.trim() ? node.note : "No note. Click to add one.";
-  const openNote = () => useFiles.getState().openReader(node.id);
+  const openNote = () => useFiles.getState().openReader(items.length === 1 ? items[0].id : node.id);
   const resize = (event: ReactPointerEvent) => {
     if (event.button !== 0) return;
     event.preventDefault();
@@ -1351,7 +1413,9 @@ function DetailsStrip({ index, compact = false, className = "" }: { index: 0 | 1
         <span className={compact ? "absolute inset-x-2 top-1/2 h-px bg-line" : "absolute inset-y-2 left-1/2 w-px bg-line"} />
       </span>
       <div className="flex items-start gap-1">
-        <div className="min-w-0 flex-1 truncate font-semibold" title={node.kind === "drive" ? driveCaption(node) : node.name}>{node.kind === "drive" ? driveCaption(node) : node.name}{extra}</div>
+        <div className="min-w-0 flex-1 font-semibold">
+          {items.length > 1 ? `${items.length} selected` : items[0].kind === "drive" ? driveCaption(items[0]) : items[0].name}
+        </div>
         <button
           type="button"
           aria-label="Close details"
@@ -1362,15 +1426,46 @@ function DetailsStrip({ index, compact = false, className = "" }: { index: 0 | 1
           <X className="size-3.5" />
         </button>
       </div>
-      <div className="flex flex-wrap gap-x-3">
-        <span className="tabular-nums">{shownSize(node.bytes, node.approx) || "Not measured"}</span>
-        {node.kind === "drive" && <span>{node.mounted === false ? "Not mounted" : "Mounted"}</span>}
-        <span className="text-muted">{flags}</span>
+      <div className="font-semibold tabular-nums">
+        Total {unknown && total === 0 ? "Not measured" : `${shownSize(total, approx) || "0 B"}${unknown ? " +" : ""}`}
       </div>
-      <div className="break-all text-muted" title={place}>{place}</div>
-      <button type="button" className="min-h-11 w-full whitespace-pre-wrap break-words text-left hover:underline" title={node.note || "Add a note"} onClick={openNote}>
-        {note}
-      </button>
+      <ul className="space-y-2">
+        {items.map((item) => {
+          const parts = makeup(item.id);
+          const name = item.kind === "drive" ? driveCaption(item) : item.name;
+          return (
+            <li key={item.id}>
+              <div className="truncate font-semibold" title={name}>{name}</div>
+              <div className="text-muted">{typeLabel(item)} · {shownSize(item.bytes, item.approx) || "Not measured"}</div>
+              {item.kind !== "file" && (
+                parts.length === 0 ? (
+                  <div className="text-muted">Contents are not loaded yet.</div>
+                ) : (
+                  <ul className="mt-0.5 space-y-0.5 pl-2">
+                    {parts.map(([label, group]) => (
+                      <li key={label} className="truncate text-muted">
+                        {label} · {group.count} · {group.missing && group.bytes === 0 ? "Not measured" : `${formatSize(group.bytes) || "0 B"}${group.missing ? " +" : ""}`}
+                      </li>
+                    ))}
+                  </ul>
+                )
+              )}
+            </li>
+          );
+        })}
+      </ul>
+      {items.length === 1 && (
+        <>
+          <div className="flex flex-wrap gap-x-3">
+            {node.kind === "drive" && <span>{node.mounted === false ? "Not mounted" : "Mounted"}</span>}
+            <span className="text-muted">{flags}</span>
+          </div>
+          <div className="break-all text-muted" title={place}>{place}</div>
+          <button type="button" className="min-h-11 w-full whitespace-pre-wrap break-words text-left hover:underline" title={node.note || "Add a note"} onClick={openNote}>
+            {note}
+          </button>
+        </>
+      )}
     </aside>
   );
 }
@@ -2502,6 +2597,7 @@ export function FileManager() {
 
   const readerId = useFiles((s) => s.readerId);
   const tab = useFiles((s) => s.tab);
+  const helpPage = useFiles((s) => s.helpPage);
   return (
     <div className="flex h-dvh flex-col overflow-hidden bg-app text-ink">
       <header className="flex h-8 shrink-0 items-center px-3">
@@ -2512,7 +2608,7 @@ export function FileManager() {
       <div className="relative flex min-h-0 flex-1">
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         {tab === "resources" ? (
-          <ManualPage />
+          helpPage === "about" ? <AboutPage /> : <ManualPage />
         ) : split ? (
           <Group orientation="vertical" className="min-h-0 flex-1">
             <Panel minSize="20%" id="pane-a" className="min-h-0">
