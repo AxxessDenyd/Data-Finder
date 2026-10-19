@@ -74,6 +74,7 @@ import {
 } from "@/lib/file-store";
 import { childrenOf, driveCaption, formatDate, formatSize, pathIds, resolvePath, typeLabel, type FsNode } from "@/lib/vfs";
 import { diskPath, isDesktop, isDiskId, withoutDisk } from "@/lib/disk";
+import { manualSections } from "@/lib/manual";
 
 const UI_KEY = "data-finder-ui";
 const CATALOG_KEY = "data-finder-catalog";
@@ -579,7 +580,7 @@ function HomeRibbon() {
       </SectionMenu>
       {favOpen && favBox && <PlacesMenu anchor={favBox} onClose={() => setFavOpen(false)} />}
       <SectionMenu label="Layout">
-        <MenuAction label="Two panes" icon={<Columns2 className="size-4" />} onClick={() => store().toggleSplit()} />
+        <MenuAction label={split ? "One pane" : "Two panes"} icon={<Columns2 className="size-4" />} onClick={() => store().toggleSplit()} />
         <MenuAction label="Gaps" icon={<Diff className="size-4" />} onClick={() => store().toggleDiff()} />
         <MenuAction label="Copy missing" disabled={!split} icon={<ArrowLeftRight className="size-4" />} onClick={() => store().mirror()} />
         <MenuAction label="Update other" disabled={!split} icon={<FolderSync className="size-4" />} onClick={() => store().syncOther()} />
@@ -588,7 +589,7 @@ function HomeRibbon() {
         <MenuAction label="Same size" icon={<Files className="size-4" />} onClick={() => store().toggleDupes()} />
         <MenuAction label="Queue" icon={<ClipboardPaste className="size-4" />} onClick={() => store().toggleTransfers()} />
         <MenuAction label="Activity" icon={<FileText className="size-4" />} onClick={() => store().toggleLog()} />
-        <MenuAction label="How to" icon={<CircleHelp className="size-4" />} onClick={() => store().openDialog({ kind: "help" })} />
+        <MenuAction label="Manual" icon={<CircleHelp className="size-4" />} onClick={() => store().setTab("resources")} />
       </SectionMenu>
     </div>
   );
@@ -782,18 +783,34 @@ function OptionsRibbon() {
 
 function ResourcesRibbon() {
   return (
-    <div className="flex items-stretch gap-1 overflow-x-auto px-1 py-1">
-      <GroupBox title="Start">
-        <RibbonButton label="How it works" icon={<CircleHelp className="size-4" />} onClick={() => useFiles.getState().openDialog({ kind: "help" })} />
-      </GroupBox>
-      <GroupBox title="Open">
-        <RibbonButton label="Find" icon={<Filter className="size-4" />} onClick={() => useFiles.getState().setTab("inspect")} />
-        <RibbonButton label="View" icon={<Scale className="size-4" />} onClick={() => useFiles.getState().setTab("options")} />
-      </GroupBox>
-      <p className="flex max-w-xl items-center px-3 text-sm text-muted">
-        Data Finder browses this catalog. Find narrows a folder, View sets the size bars and dates, and Analyze lines folders up and opens saved copies.
-      </p>
+    <div className="flex items-center gap-1 px-2 py-1">
+      <p className="px-2 text-sm text-muted">The manual below matches the current program.</p>
     </div>
+  );
+}
+
+function ManualPage() {
+  return (
+    <article className="min-h-0 flex-1 overflow-auto bg-pane px-6 py-5">
+      <h2 className="text-lg font-semibold">Data Finder manual</h2>
+      <div className="mt-4 max-w-3xl space-y-5">
+        {manualSections.map((section) => (
+          <section key={section.title}>
+            <h3 className="text-sm font-semibold">{section.title}</h3>
+            {section.paragraphs?.map((text) => (
+              <p key={text} className="mt-1 text-sm text-muted">{text}</p>
+            ))}
+            {section.items && (
+              <ul className="mt-1 list-disc space-y-1 pl-5 text-sm">
+                {section.items.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+            )}
+          </section>
+        ))}
+      </div>
+    </article>
   );
 }
 
@@ -1837,24 +1854,10 @@ function Dialogs() {
         {dialog.kind === "help" && (
           <div>
             <h2 className="text-base font-semibold">Data Finder</h2>
-            <p className="mt-2 text-sm text-muted">Dual-pane file window. Open folder reads one real folder in Chrome or Edge. The desktop app reads the drives on the computer it runs on. Until a real folder is open, you are looking at the practice catalog.</p>
-            <ul className="mt-3 space-y-1 text-sm">
-              <li>Enter opens. Backspace goes up. F5 refreshes. F2 renames. Delete removes.</li>
-              <li>Ctrl+Z undoes the last practice-catalog change. Changes on a real disk are not undone.</li>
-              <li>Ctrl+C / X / V copy, cut, and paste. Ctrl+Shift+C copies the location. Ctrl+A selects the folder.</li>
-              <li>F6 switches panes. Ctrl+F opens Find. Drag a row to the other pane to move it, or hold Ctrl to copy.</li>
-              <li>Paste asks when a name is already there: keep both, rename the old one to .old, overwrite, update newer files, or skip.</li>
-              <li>Ctrl+Shift+F searches the catalog. Starred jumps to system and user folders in this catalog.</li>
-              <li>Measure fills folder sizes. On a real disk it walks the folders in view, and a folder that is too large stays blank.</li>
-              <li>Two panes stacks a second folder. Gaps tints names the other pane lacks. Copy missing adds those names. Update other also replaces files that are older than this pane.</li>
-              <li>All files lists every file under the folder, sorted by size. Close the banner to go back.</li>
-              <li>Find → Pattern selects a pattern such as *.sys or over 100MB and leaves the rest of the folder on screen.</li>
-              <li>Flags on Home or Find can show only hidden, read-only, or system files, hide one of those, or show everything.</li>
-              <li>The strip beside the list shows size, flags, location, and the note. Click the note to open the reading pane. Right-click to create a folder or a file.</li>
-              <li>View → Restore sample puts the practice catalog back. Sort choices stay with each pane.</li>
-            </ul>
-            <div className="mt-3 flex justify-end">
-              <button type="button" className="min-h-11 bg-accent px-3 text-accent-ink" onClick={() => useFiles.getState().openDialog(null)}>Close</button>
+            <p className="mt-2 text-sm text-muted">The full manual is on the Help tab.</p>
+            <div className="mt-3 flex justify-end gap-2">
+              <button type="button" className="min-h-11 px-3" onClick={() => useFiles.getState().openDialog(null)}>Close</button>
+              <button type="button" className="min-h-11 bg-accent px-3 text-accent-ink" onClick={() => { useFiles.getState().openDialog(null); useFiles.getState().setTab("resources"); }}>Open manual</button>
             </div>
           </div>
         )}
@@ -2498,6 +2501,7 @@ export function FileManager() {
   }, []);
 
   const readerId = useFiles((s) => s.readerId);
+  const tab = useFiles((s) => s.tab);
   return (
     <div className="flex h-dvh flex-col overflow-hidden bg-app text-ink">
       <header className="flex h-8 shrink-0 items-center px-3">
@@ -2507,7 +2511,9 @@ export function FileManager() {
       <Ribbon />
       <div className="relative flex min-h-0 flex-1">
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        {split ? (
+        {tab === "resources" ? (
+          <ManualPage />
+        ) : split ? (
           <Group orientation="vertical" className="min-h-0 flex-1">
             <Panel minSize="20%" id="pane-a" className="min-h-0">
               <PaneView index={0} />
