@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { Group, Panel, Separator } from "react-resizable-panels";
 import {
   AppWindow,
@@ -73,7 +73,7 @@ import {
   type ViewMode,
 } from "@/lib/file-store";
 import { childrenOf, driveCaption, formatDate, formatSize, pathIds, resolvePath, typeLabel, type FsNode } from "@/lib/vfs";
-import { isDesktop, isDiskId, withoutDisk } from "@/lib/disk";
+import { diskPath, isDesktop, isDiskId, withoutDisk } from "@/lib/disk";
 
 const UI_KEY = "data-finder-ui";
 const CATALOG_KEY = "data-finder-catalog";
@@ -680,7 +680,10 @@ function ToolsRibbon() {
   const [placesOpen, setPlacesOpen] = useState(false);
   const [placesBox, setPlacesBox] = useState<DOMRect | null>(null);
   const placesRef = useRef<HTMLDivElement>(null);
-  const relevant = shadows.filter((item) => item.folderId === pathId);
+  const snaps = useFiles((s) => s.snaps);
+  const labels: Record<string, string> = { c: "C:", users: "Users", downloads: "Downloads", pf: "Program Files" };
+  const here = diskPath(pathId) || (nodes[pathId] ? displayPath({ nodes, order: useFiles.getState().order }, pathId) : "");
+  const mine = snaps.filter((item) => item.folderId === pathId || item.path === here);
   return (
     <div className="flex items-stretch gap-1 overflow-x-auto px-1 py-1">
       <GroupBox title="Look up">
@@ -691,11 +694,14 @@ function ToolsRibbon() {
         <RibbonButton label="Line up" disabled={!split} icon={<GitCompare className="size-4" />} onClick={() => useFiles.getState().compare()} />
       </GroupBox>
       <GroupBox title="Snapshots">
-        {relevant.length === 0 && <span className="flex h-14 items-center px-2 text-xs text-muted">No snapshots here</span>}
-        {relevant.map((item) => (
-          <RibbonButton key={item.id} label={new Date(item.taken).toLocaleDateString()} icon={<History className="size-4" />} active={shadowId === item.id} onClick={() => useFiles.getState().openShadow(active, item.id)} />
+        <RibbonButton label="Save snapshot" icon={<History className="size-4" />} onClick={() => useFiles.getState().takeSnapshot()} />
+        {shadows.map((item) => (
+          <RibbonButton key={item.id} label={`${labels[item.folderId] ?? "Folder"} · ${new Date(item.taken).toLocaleDateString()}`} icon={<History className="size-4" />} active={shadowId === item.id} onClick={() => useFiles.getState().openShadow(active, item.id)} />
         ))}
-        <RibbonButton label="Bring back" disabled={!shadowId} icon={<RotateCcw className="size-4" />} onClick={() => useFiles.getState().restoreShadow()} />
+        {mine.map((item) => (
+          <RibbonButton key={item.id} label={new Date(item.taken).toLocaleString()} icon={<History className="size-4" />} active={shadowId === item.id} onClick={() => useFiles.getState().openShadow(active, item.id)} />
+        ))}
+        <RibbonButton label="Bring back" disabled={!shadowId} icon={<RotateCcw className="size-4" />} onClick={() => void useFiles.getState().restoreShadow()} />
         {shadowId && <RibbonButton label="Close" icon={<X className="size-4" />} onClick={() => useFiles.getState().clearShadow()} />}
       </GroupBox>
       <GroupBox title="Records">
@@ -2089,52 +2095,71 @@ function FormatDialog({ id }: { id: string }) {
 
 function ContextMenu() {
   const menu = useFiles((s) => s.menu);
+  const ref = useRef<HTMLDivElement>(null);
+  const [box, setBox] = useState<{ left: number; top: number; maxHeight: number } | null>(null);
+  useLayoutEffect(() => {
+    if (!menu || !ref.current) return;
+    const pad = 8;
+    const rect = ref.current.getBoundingClientRect();
+    const width = rect.width || 220;
+    const height = rect.height || 320;
+    const left = Math.max(pad, Math.min(menu.x, window.innerWidth - width - pad));
+    const top = Math.max(pad, Math.min(menu.y, window.innerHeight - Math.min(height, window.innerHeight - pad * 2) - pad));
+    setBox({ left, top, maxHeight: window.innerHeight - top - pad });
+  }, [menu]);
   if (!menu) return null;
   const id = menu.id;
-  const left = typeof window === "undefined" ? menu.x : Math.max(8, Math.min(menu.x, window.innerWidth - 200));
-  const top = typeof window === "undefined" ? menu.y : Math.max(8, Math.min(menu.y, window.innerHeight - 420));
-  const item = (label: string, fn: () => void) => (
+  const state = useFiles.getState();
+  const node = id ? state.nodes[id] : undefined;
+  const active = state.active;
+  const selected = state.panes[active].selected;
+  const createIn = node && node.kind !== "file" ? node.id : state.panes[active].pathId;
+  const canDelete = !!node && node.kind !== "drive" && node.kind !== "computer";
+  const item = (label: string, fn: () => void, icon?: ReactNode, danger?: boolean) => (
     <button
       type="button"
-      className="block min-h-11 w-full px-3 text-left text-sm hover:bg-select"
+      className={"flex min-h-9 w-full items-center gap-2 rounded-md px-2 text-left text-sm hover:bg-select " + (danger ? "text-danger" : "")}
       onClick={() => {
         fn();
         useFiles.getState().openMenu(null);
       }}
     >
-      {label}
+      <span className="grid size-4 shrink-0 place-items-center text-muted">{icon}</span>
+      <span>{label}</span>
     </button>
   );
-  const node = id ? useFiles.getState().nodes[id] : undefined;
-  const createIn = node && node.kind !== "file" ? node.id : undefined;
+  const rule = <div className="my-1 h-px bg-line" />;
+  const place = box ?? {
+    left: Math.max(8, Math.min(menu.x, (typeof window === "undefined" ? 800 : window.innerWidth) - 232)),
+    top: Math.max(8, menu.y),
+    maxHeight: 480,
+  };
   return (
     <>
       <button type="button" aria-label="Close menu" className="fixed inset-0 z-30" onMouseDown={(e) => { if (e.button === 0) useFiles.getState().openMenu(null); }} onContextMenu={(e) => e.preventDefault()} />
-      <div className="fixed z-40 min-w-44 border border-line bg-pane py-1 shadow-md" style={{ left, top }}>
-        {id && item("Open", () => useFiles.getState().openItem(useFiles.getState().active, id))}
-        {id && item("Show folder", () => useFiles.getState().reveal(useFiles.getState().active, id))}
-        {item("New folder", () => useFiles.getState().openDialog({ kind: "new", file: false, parentId: createIn }))}
-        {item("New file", () => useFiles.getState().openDialog({ kind: "new", file: true, parentId: createIn }))}
-        {item("Copy", () => useFiles.getState().copy())}
-        {item("Cut", () => useFiles.getState().cut())}
-        {item("Paste", () => useFiles.getState().paste())}
-        {node && item("Read note", () => useFiles.getState().openReader(node.id))}
-        {node && item("Rename", () => useFiles.getState().openDialog({ kind: "rename", id: node.id, name: node.name }))}
-        {id && item("Delete", () => useFiles.getState().openDialog({ kind: "delete", ids: useFiles.getState().panes[useFiles.getState().active].selected.length ? useFiles.getState().panes[useFiles.getState().active].selected : [id] }))}
-        {id && item("Info", () => useFiles.getState().openDialog({ kind: "props", id }))}
-        {node?.kind === "file" && node.name.toLowerCase().endsWith(".iso") && item("Mount image", () => void useFiles.getState().mountImage(node.id))}
-        {node?.kind === "drive" && !node.system && node.mounted !== false && node.name.endsWith(":") && item("Format", () => useFiles.getState().openDialog({ kind: "format", id: node.id }))}
-        {node?.kind === "drive" && !node.system && node.mounted !== false && item("Unmount", () => useFiles.getState().openDialog({ kind: "unmount", id: node.id }))}
-        {item("Copy location", () => {
-          const state = useFiles.getState();
-          void state.copyPath(id ?? state.panes[state.active].pathId);
-        })}
-        {item("Flip selection", () => {
-          const state = useFiles.getState();
-          state.invertSelection(state.active, listing(state, state.active).rows.map((row) => row.id));
-        })}
-        {item("Pick by pattern", () => useFiles.getState().openDialog({ kind: "mask" }))}
-        {node && node.kind !== "file" && item(useFiles.getState().favorites.includes(id!) ? "Unstar" : "Star", () => useFiles.getState().toggleFavorite(id!))}
+      <div ref={ref} className="fixed z-40 w-56 overflow-auto rounded-lg border border-line bg-menu p-1 shadow-xl" style={{ left: place.left, top: place.top, maxHeight: place.maxHeight }}>
+        {id && item("Open", () => state.openItem(active, id), <Folder className="size-4" />)}
+        {id && node?.kind !== "drive" && item("Show in folder", () => state.reveal(active, id), <Folder className="size-4" />)}
+        {rule}
+        {item("Cut", () => state.cut(), <Scissors className="size-4" />)}
+        {item("Copy", () => state.copy(), <Copy className="size-4" />)}
+        {item("Paste", () => state.paste(), <ClipboardPaste className="size-4" />)}
+        {rule}
+        {node && item("Rename", () => state.openDialog({ kind: "rename", id: node.id, name: node.name }), <Pencil className="size-4" />)}
+        {canDelete && item("Delete", () => state.openDialog({ kind: "delete", ids: selected.length ? selected : [id!] }), <Trash2 className="size-4" />, true)}
+        {rule}
+        {item("New folder", () => state.openDialog({ kind: "new", file: false, parentId: createIn }), <FolderPlus className="size-4" />)}
+        {item("New file", () => state.openDialog({ kind: "new", file: true, parentId: createIn }), <FilePlus className="size-4" />)}
+        {rule}
+        {item("Copy location", () => void state.copyPath(id ?? state.panes[active].pathId), <Link className="size-4" />)}
+        {id && item("Info", () => state.openDialog({ kind: "props", id }), <FileText className="size-4" />)}
+        {node && item("Read note", () => state.openReader(node.id), <FileText className="size-4" />)}
+        {node && node.kind !== "file" && item(state.favorites.includes(id!) ? "Unpin" : "Pin", () => state.toggleFavorite(id!), <Star className="size-4" />)}
+        {node?.kind === "file" && node.name.toLowerCase().endsWith(".iso") && item("Mount image", () => void state.mountImage(node.id), <HardDrive className="size-4" />)}
+        {node?.kind === "drive" && !node.system && node.mounted !== false && item("Unmount", () => state.openDialog({ kind: "unmount", id: node.id }), <Unplug className="size-4" />)}
+        {node?.kind === "drive" && !node.system && node.mounted !== false && node.name.endsWith(":") && item("Format", () => state.openDialog({ kind: "format", id: node.id }), <Trash2 className="size-4" />)}
+        {item("Refresh", () => state.refresh(), <RefreshCw className="size-4" />)}
+        {item("Save snapshot", () => state.takeSnapshot(), <History className="size-4" />)}
       </div>
     </>
   );
@@ -2348,6 +2373,7 @@ export function FileManager() {
         itemChecks: state.itemChecks,
         showExt: state.showExt,
         previewOpen: state.previewOpen,
+        snaps: state.snaps,
         uiRev: 2,
       };
       try {

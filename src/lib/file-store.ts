@@ -249,6 +249,7 @@ interface FileState extends FsSnapshot {
   detailHeight: number;
   detailWidth: number;
   detailsOpen: boolean;
+  snaps: Array<ShadowCopy & { path: string }>;
   viewMode: ViewMode;
   showNav: boolean;
   compact: boolean;
@@ -345,6 +346,7 @@ export interface UiPrefs {
   itemChecks?: boolean;
   showExt?: boolean;
   previewOpen?: boolean;
+  snaps?: Array<ShadowCopy & { path: string }>;
   uiRev?: number;
   sort?: [{ key: SortKey; dir: "asc" | "desc" }, { key: SortKey; dir: "asc" | "desc" }];
 }
@@ -410,6 +412,7 @@ interface Actions {
   openShadow: (index: 0 | 1, shadowId: string) => void;
   clearShadow: () => void;
   restoreShadow: (shadowId?: string) => void;
+  takeSnapshot: () => void;
   mirror: () => void;
   syncOther: () => void;
   toggleFlat: (index?: 0 | 1) => void;
@@ -742,6 +745,7 @@ export const useFiles = create<FileState & Actions>((set, get) => ({
   showExt: true,
   previewOpen: false,
   uiRev: 2,
+  snaps: [],
   readerId: null,
 
   setActive: (index) => set({ active: index }),
@@ -1687,12 +1691,34 @@ export const useFiles = create<FileState & Actions>((set, get) => ({
 
   clearShadow: () => set({ shadowPane: null, shadowId: null, status: "Snapshot closed" }),
 
-  restoreShadow: (shadowId) => {
+  restoreShadow: async (shadowId) => {
     const state = get();
     const id = shadowId ?? state.shadowId;
-    const shadow = shadows.find((item) => item.id === id);
+    const shadow = shadows.find((item) => item.id === id) ?? state.snaps.find((item) => item.id === id);
     if (!shadow) return;
     const dest = state.panes[state.active].pathId;
+    const builtIn = shadows.some((item) => item.id === shadow.id);
+    if (builtIn && isDiskId(dest)) {
+      set({ status: "Those practice copies stay off your real disks" });
+      return;
+    }
+    if (isDiskId(dest)) {
+      const names = new Set((state.order[dest] ?? []).map((item) => state.nodes[item]?.name.toLowerCase()));
+      let count = 0;
+      for (const file of shadow.files) {
+        if (names.has(file.name.toLowerCase())) continue;
+        try {
+          await diskCreate(dest, file.name, file.kind === "file");
+          count += 1;
+        } catch (error) {
+          set({ status: error instanceof Error ? error.message : "Could not bring that snapshot back" });
+          return;
+        }
+      }
+      get().refresh();
+      set({ status: count ? `Brought back ${count} item(s)` : "Snapshot already matches this folder" });
+      return;
+    }
     let seq = state.seq;
     const nodes = { ...state.nodes };
     const order = { ...state.order };
@@ -1723,7 +1749,7 @@ export const useFiles = create<FileState & Actions>((set, get) => ({
       log: [...state.log, logLine(count ? `Brought back ${count} item(s)` : "Snapshot skipped")],
       undoStack: count ? rememberUndo(state, `restore ${count}`) : state.undoStack,
     });
-    if (count) {
+    if (count && !isDiskId(dest)) {
       enqueueTransfer(set, get, {
         op: "Restore",
         source: shadow.id,
@@ -1737,6 +1763,42 @@ export const useFiles = create<FileState & Actions>((set, get) => ({
         policyId: "skip",
       });
     }
+  },
+
+  takeSnapshot: () => {
+    const state = get();
+    const folderId = state.panes[state.active].pathId;
+    const node = state.nodes[folderId];
+    if (!node || node.kind === "file" || node.kind === "computer") {
+      set({ status: "Open a folder, then save a snapshot" });
+      return;
+    }
+    if (!state.order[folderId]) {
+      set({ status: "Open the folder so its contents can be saved" });
+      return;
+    }
+    const files = (state.order[folderId] ?? [])
+      .map((item) => state.nodes[item])
+      .filter((item) => item && (item.kind === "file" || item.kind === "dir"))
+      .map((item) => ({
+        name: item.name,
+        bytes: item.kind === "file" ? item.bytes : null,
+        kind: item.kind === "file" ? "file" as const : "dir" as const,
+        modified: item.modified,
+        note: item.note,
+      }));
+    const snap = {
+      id: `snap-${Date.now()}`,
+      folderId,
+      path: diskPath(folderId) || displayPath(state, folderId),
+      taken: Date.now(),
+      files,
+    };
+    set({
+      snaps: [...state.snaps, snap].slice(-40),
+      status: `Snapshot saved · ${files.length} item(s)`,
+      log: [...state.log, logLine(`Snapshot saved · ${snap.path}`)],
+    });
   },
 
   mirror: () => {
@@ -2217,6 +2279,7 @@ export const useFiles = create<FileState & Actions>((set, get) => ({
         itemChecks: prefs.itemChecks ?? state.itemChecks,
         showExt: prefs.showExt ?? state.showExt,
         previewOpen: prefs.previewOpen ?? state.previewOpen,
+        snaps: prefs.snaps ?? state.snaps,
         uiRev: 2,
         nodes,
         order,
@@ -2421,7 +2484,9 @@ function sortRows(rows: ListRow[], key: SortKey, dir: "asc" | "desc") {
 
 export function listing(state: FileState, index: 0 | 1): { rows: ListRow[]; banner: string | null; total: number } {
   const paneState = state.panes[index];
-  const shadow = state.shadowPane === index ? shadows.find((item) => item.id === state.shadowId) : undefined;
+  const shadow = state.shadowPane === index
+    ? shadows.find((item) => item.id === state.shadowId) ?? state.snaps.find((item) => item.id === state.shadowId)
+    : undefined;
   let rows: ListRow[] = [];
   let banner: string | null = null;
   let total = 0;
