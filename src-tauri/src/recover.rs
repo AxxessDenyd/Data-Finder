@@ -548,7 +548,7 @@ impl Volume {
             return false;
         }
         let mut read = 0u32;
-        unsafe { read_file(self.handle, buf.as_mut_ptr(), buf.len() as u32, &mut read, std::ptr::null_mut()) != 0 && read as usize == buf.len() }
+        unsafe { ReadFile(self.handle, buf.as_mut_ptr(), buf.len() as u32, &mut read, std::ptr::null_mut()) != 0 && read as usize == buf.len() }
     }
 }
 
