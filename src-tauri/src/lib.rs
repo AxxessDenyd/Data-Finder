@@ -1631,6 +1631,323 @@ fn short_restore_error(message: &str) -> String {
     short
 }
 
+fn ps_quote(value: &str) -> Result<String, String> {
+    if value.is_empty() || value.len() > 1024 || value.chars().any(|ch| ch.is_control()) {
+        return Err("That value cannot be used".into());
+    }
+    Ok(format!("'{}'", value.replace('\'', "''")))
+}
+
+fn recovery_digits(raw: &str) -> Result<String, String> {
+    let digits: String = raw.chars().filter(|ch| ch.is_ascii_digit()).collect();
+    if digits.len() != 48 {
+        return Err("A recovery key is 48 digits, in eight groups of six.".into());
+    }
+    let mut out = String::new();
+    for (index, ch) in digits.chars().enumerate() {
+        if index > 0 && index % 6 == 0 {
+            out.push('-');
+        }
+        out.push(ch);
+    }
+    Ok(out)
+}
+
+fn capture_ps(body: &str, elevate: bool) -> Result<String, String> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|dur| dur.as_millis())
+            .unwrap_or(0);
+        let dir = std::env::temp_dir();
+        let script_path = dir.join(format!("df-bitlocker-{stamp}.ps1"));
+        let result_path = dir.join(format!("df-bitlocker-{stamp}.txt"));
+        let script_text = script_path.to_string_lossy().to_string();
+        let result_text = result_path.to_string_lossy().to_string();
+        let quoted = ps_quote(&result_text).map_err(|_| "Could not start that BitLocker step".to_string())?;
+        let full = format!(
+            "$dfResult = {quoted}\nfunction Save([string]$text) {{ Set-Content -LiteralPath $dfResult -Value $text -Encoding ascii }}\n$ErrorActionPreference = 'Stop'\ntry {{\n"
+        ) + body + "\n} catch {\n  Save ('error:' + $_.Exception.Message)\n  exit 1\n}\n";
+        fs::write(&script_path, full).map_err(|err| err.to_string())?;
+        let outer = r#"$ErrorActionPreference = 'Stop'
+$script = $env:DF_SCRIPT
+if (-not $script) { Write-Output 'error:Could not run that BitLocker step'; exit 1 }
+try {
+  $text = Get-Content -LiteralPath $script -Raw
+  $encoded = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($text))
+  $admin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+  $arg = @('-NoProfile','-ExecutionPolicy','Bypass','-EncodedCommand', $encoded)
+  $need = $env:DF_ELEVATE -eq 'yes' -and -not $admin
+  if ($need) {
+    $proc = Start-Process -FilePath powershell.exe -Verb RunAs -Wait -PassThru -WindowStyle Hidden -ArgumentList $arg
+  } else {
+    $proc = Start-Process -FilePath powershell.exe -Wait -PassThru -WindowStyle Hidden -ArgumentList $arg
+  }
+  if (-not $proc) { Write-Output 'cancelled'; exit 5 }
+  exit $proc.ExitCode
+} catch {
+  $text = "$_"
+  if ($text -match 'cancel') { Write-Output 'cancelled'; exit 5 }
+  Write-Output ('error:' + $_.Exception.Message)
+  exit 1
+}
+"#;
+        let output = Command::new("powershell")
+            .args(["-NoProfile", "-NonInteractive", "-Command", outer])
+            .env("DF_SCRIPT", &script_text)
+            .env("DF_ELEVATE", if elevate { "yes" } else { "no" })
+            .creation_flags(0x08000000)
+            .output()
+            .map_err(|err| err.to_string())?;
+        let saved = fs::read_to_string(&result_path).unwrap_or_default();
+        let _ = fs::remove_file(&script_path);
+        let _ = fs::remove_file(&result_path);
+        let saved = saved.trim().to_string();
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        if stdout.to_lowercase().contains("cancelled") {
+            return Err("Windows permission was not given.".into());
+        }
+        if let Some(message) = saved.strip_prefix("error:") {
+            return Err(short_bitlocker_error(message));
+        }
+        if stdout.trim().to_lowercase().starts_with("error:") {
+            return Err(short_bitlocker_error(stdout.trim().trim_start_matches("error:")));
+        }
+        if saved.is_empty() {
+            let detail = if stdout.trim().is_empty() {
+                String::from_utf8_lossy(&output.stderr).trim().to_string()
+            } else {
+                stdout.trim().to_string()
+            };
+            if !detail.is_empty() {
+                return Err(short_bitlocker_error(&detail));
+            }
+            return Err("Windows did not finish that BitLocker step".into());
+        }
+        Ok(saved)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (body, elevate);
+        Err("BitLocker works in the Windows program".into())
+    }
+}
+
+fn short_bitlocker_error(message: &str) -> String {
+    let line = message.lines().find(|line| !line.trim().is_empty()).unwrap_or("Windows could not finish that BitLocker step").trim();
+    let line = line.strip_prefix("error:").unwrap_or(line).trim();
+    let short: String = line.chars().take(220).collect();
+    if short.is_empty() {
+        "Windows could not finish that BitLocker step".into()
+    } else {
+        short
+    }
+}
+
+#[derive(Serialize)]
+struct BitLockerDrive {
+    letter: String,
+    lock: String,
+    protection: String,
+    state: String,
+    percent: u32,
+    volume: String,
+    protectors: String,
+}
+
+fn parse_bitlocker_line(line: &str) -> Option<BitLockerDrive> {
+    let parts: Vec<&str> = line.split('|').collect();
+    if parts.len() < 7 || !parts[0].contains(':') {
+        return None;
+    }
+    let letter = parts[0].chars().find(|ch| ch.is_ascii_alphabetic())?;
+    let percent = parts[4].trim().parse::<u32>().unwrap_or(0);
+    Some(BitLockerDrive {
+        letter: letter.to_ascii_uppercase().to_string(),
+        lock: parts[1].trim().to_string(),
+        protection: parts[2].trim().to_string(),
+        state: parts[3].trim().to_string(),
+        percent,
+        volume: parts[5].trim().to_string(),
+        protectors: parts[6].trim().to_string(),
+    })
+}
+
+#[tauri::command]
+fn bitlocker_status(elevate: bool) -> Result<Vec<BitLockerDrive>, String> {
+    let body = r#"$lines = New-Object System.Collections.Generic.List[string]
+foreach ($vol in @(Get-BitLockerVolume)) {
+  $kinds = @($vol.KeyProtector | ForEach-Object { [string]$_.KeyProtectorType }) -join ','
+  $mount = [string]$vol.MountPoint
+  $lines.Add(($mount + '|' + [string]$vol.LockStatus + '|' + [string]$vol.ProtectionStatus + '|' + [string]$vol.VolumeStatus + '|' + [string]$vol.EncryptionPercentage + '|' + [string]$vol.VolumeType + '|' + $kinds))
+}
+if ($lines.Count -eq 0) { Save 'none' } else { Save ($lines -join [char]10) }
+"#;
+    let text = capture_ps(body, elevate)?;
+    if text == "none" {
+        return Ok(Vec::new());
+    }
+    Ok(text.lines().filter_map(parse_bitlocker_line).collect())
+}
+
+#[tauri::command]
+async fn bitlocker_unlock(drive: String, mode: String, secret: String) -> Result<String, String> {
+    let letter = one_drive_letter(&drive)?;
+    let mode = match mode.as_str() {
+        "recovery" | "password" | "bek" => mode,
+        _ => return Err("Choose a recovery key, a password, or a key file".into()),
+    };
+    let secret = match mode.as_str() {
+        "recovery" => recovery_digits(&secret)?,
+        "password" => {
+            if secret.chars().any(|ch| ch.is_control()) || secret.is_empty() || secret.len() > 256 {
+                return Err("That password cannot be used".into());
+            }
+            secret
+        }
+        "bek" => {
+            if secret.chars().any(|ch| ch.is_control()) || secret.len() > 1024 || !Path::new(secret.trim()).is_file() {
+                return Err("That key file was not found".into());
+            }
+            secret.trim().to_string()
+        }
+        _ => return Err("Choose a recovery key, a password, or a key file".into()),
+    };
+    let quoted = ps_quote(&secret)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let body = format!(
+            r#"$mount = '{letter}:'
+$mode = '{mode}'
+$secret = {quoted}
+if ($mode -eq 'recovery') {{
+  Unlock-BitLocker -MountPoint $mount -RecoveryPassword $secret | Out-Null
+}} elseif ($mode -eq 'password') {{
+  $secure = ConvertTo-SecureString $secret -AsPlainText -Force
+  Unlock-BitLocker -MountPoint $mount -Password $secure | Out-Null
+}} else {{
+  Unlock-BitLocker -MountPoint $mount -RecoveryKeyPath $secret | Out-Null
+}}
+Save 'unlocked'
+"#,
+            letter = letter,
+            mode = mode,
+            quoted = quoted
+        );
+        capture_ps(&body, true)?;
+        Ok(format!("{letter}: is unlocked. Open it from This computer, or decrypt it if you want BitLocker removed."))
+    })
+    .await
+    .map_err(|err| err.to_string())?
+}
+
+#[tauri::command]
+async fn bitlocker_off(drive: String) -> Result<String, String> {
+    let letter = one_drive_letter(&drive)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let body = format!(
+            "$vol = Get-BitLockerVolume -MountPoint '{letter}:'\nif ([string]$vol.LockStatus -eq 'Locked') {{ throw 'This drive is locked. Enter its recovery key, password, or key file first.' }}\nDisable-BitLocker -MountPoint '{letter}:' | Out-Null\nSave 'started'\n",
+            letter = letter
+        );
+        capture_ps(&body, true)?;
+        Ok(format!("Decryption started on {letter}:. Windows keeps the files and finishes in the background. The drive stays usable."))
+    })
+    .await
+    .map_err(|err| err.to_string())?
+}
+
+#[tauri::command]
+async fn bitlocker_on(drive: String) -> Result<String, String> {
+    let letter = one_drive_letter(&drive)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let body = format!(
+            r#"$mount = '{letter}:'
+$os = $false
+$system = $env:SystemDrive
+if ($system -and $mount.TrimEnd('\') -eq $system.TrimEnd('\')) {{ $os = $true }}
+if ($os) {{
+  try {{
+    Enable-BitLocker -MountPoint $mount -TpmProtector -UsedSpaceOnly -ErrorAction Stop | Out-Null
+  }} catch {{
+    $text = "$_"
+    if ($text -notmatch 'already|protection is on|encryption') {{ throw }}
+  }}
+  $added = Add-BitLockerKeyProtector -MountPoint $mount -RecoveryPasswordProtector
+  $key = [string]$added.RecoveryPassword
+}} else {{
+  $vol = Enable-BitLocker -MountPoint $mount -EncryptionMethod XtsAes128 -UsedSpaceOnly -RecoveryPasswordProtector
+  $key = @($vol.KeyProtector | Where-Object {{ $_.RecoveryPassword }} | Select-Object -Last 1 -ExpandProperty RecoveryPassword)
+  $key = [string]$key
+}}
+if (-not $key) {{
+  $again = Get-BitLockerVolume -MountPoint $mount
+  $key = @($again.KeyProtector | Where-Object {{ $_.RecoveryPassword }} | Select-Object -Last 1 -ExpandProperty RecoveryPassword)
+  $key = [string]$key
+}}
+if (-not $key) {{ throw 'BitLocker started, but Windows did not show a recovery key. Check the drive, then try again.' }}
+Save ('key:' + $key)
+"#,
+            letter = letter
+        );
+        let saved = capture_ps(&body, true)?;
+        let key = saved.strip_prefix("key:").unwrap_or("").trim();
+        if key.is_empty() {
+            return Err("BitLocker started, but Windows did not show a recovery key.".into());
+        }
+        Ok(recovery_digits(key).unwrap_or_else(|_| key.to_string()))
+    })
+    .await
+    .map_err(|err| err.to_string())?
+}
+
+#[tauri::command]
+fn bitlocker_save_key(folder: String, drive: String, key: String) -> Result<String, String> {
+    let letter = one_drive_letter(&drive)?;
+    let key = recovery_digits(&key)?;
+    let folder = folder.trim();
+    if folder.is_empty() || folder.chars().any(|ch| ch.is_control()) || folder.len() > 1024 {
+        return Err("Choose a folder for the key document".into());
+    }
+    let upper = folder.to_ascii_uppercase();
+    let own = format!("{letter}:");
+    if upper.starts_with(&own) {
+        return Err(format!("Save the key somewhere other than {own}. That drive is the wrong place to keep the only copy."));
+    }
+    let path = Path::new(folder).join(format!("BitLocker Recovery Key {letter}.txt"));
+    let body = format!(
+        "Data Finder BitLocker recovery key\r\nDrive: {letter}:\r\n\r\nKeep this file off {letter}:.\r\nA locked drive does not open without this key, the password, or the key file.\r\n\r\n{key}\r\n"
+    );
+    fs::write(&path, body).map_err(|err| err.to_string())?;
+    Ok(path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn choose_key_file() -> Result<String, String> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        let script = "Add-Type -AssemblyName System.Windows.Forms; $owner = New-Object System.Windows.Forms.Form; $owner.TopMost = $true; $owner.ShowInTaskbar = $false; $owner.Opacity = 0; $owner.Show(); $owner.Activate(); $dialog = New-Object System.Windows.Forms.OpenFileDialog; $dialog.Title = 'Choose the BitLocker key file'; $dialog.Filter = 'BitLocker key (*.bek)|*.bek|All files (*.*)|*.*'; $result = $dialog.ShowDialog($owner); $owner.Close(); if ($result -eq [System.Windows.Forms.DialogResult]::OK) { [Console]::Out.Write($dialog.FileName) }";
+        let output = Command::new("powershell")
+            .args(["-NoProfile", "-STA", "-Command", script])
+            .creation_flags(0x08000000)
+            .output()
+            .map_err(|err| err.to_string())?;
+        if !output.status.success() {
+            return Err("Could not open the file window".into());
+        }
+        let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if path.is_empty() {
+            return Err("No key file was chosen".into());
+        }
+        Ok(path)
+    }
+    #[cfg(not(windows))]
+    {
+        Err("Choosing a key file works in the Windows program".into())
+    }
+}
+
 #[tauri::command]
 fn choose_folder() -> Result<String, String> {
     #[cfg(windows)]
@@ -1693,7 +2010,13 @@ pub fn run() {
             earlier_entries,
             earlier_copy,
             restore_status,
-            restore_setup
+            restore_setup,
+            bitlocker_status,
+            bitlocker_unlock,
+            bitlocker_off,
+            bitlocker_on,
+            bitlocker_save_key,
+            choose_key_file
         ])
         .run(tauri::generate_context!())
         .expect("Data Finder failed to start");

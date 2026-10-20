@@ -72,7 +72,7 @@ export function columnsFrom(saved: Partial<ColumnWidths> | undefined, current: C
 }
 
 export type SortKey = "name" | "size" | "type" | "date";
-export type RibbonTab = "home" | "inspect" | "tools" | "options" | "resources" | "recovery" | "keeps";
+export type RibbonTab = "home" | "inspect" | "tools" | "options" | "resources" | "recovery" | "keeps" | "decrypt";
 export type BarMode = "linear" | "log";
 export type FindColumn = "name" | "size" | "type" | "date";
 export type DateFormat = "mdy" | "ymd" | "dmy";

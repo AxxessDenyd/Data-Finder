@@ -13,15 +13,15 @@ The same guide is inside the program. Open the Help tab, then Manual. Search the
 
 ## The window
 
-The program opens in one pane. The folder tree is on the left and the file list is on the right. The tabs are Home, Find, Recovery, Keeps, and Help.
+The program opens in one pane. The folder tree is on the left and the file list is on the right. The tabs are Home, Find, Keeps, Recovery, Decryption, and Help.
 
-Home is one bar: New, Go, Drives, Filter, Tools, and Settings, then Cut, Copy, Paste, Rename, Delete, Sort, and View, then Two panes. The tabs are Home, Find, Recovery, Keeps, and Help. The menu button holds Dark mode, Help, and About.
+Home is one bar: New, Go, Drives, Filter, Tools, and Settings, then Cut, Copy, Paste, Rename, Delete, Sort, and View, then Two panes, then Search at the right. The tabs are Home, Find, Keeps, Recovery, Decryption, and Help. The menu button holds Dark mode, Help, and About.
 
 Double-click a file to open it in the program Windows already uses for that file. Folder sizes are the full measured size. Recent, in the folder tree, folds open and closed.
 
 The newest installer and portable program are the Latest release on GitHub.
 
-The search control sits next to Help. It is a box that says Search, with a magnifying glass. Click it and the box opens so you can type. It filters the folder you have open. Click away with nothing typed, or press Escape, and it closes. Refresh sits next to the path. Check boxes sit beside each name and can select more than one file or folder at a time. Pinned and Recent are at the top of the folder tree, and each can be folded. Pinned starts open. Folding it in one pane leaves the other pane as it was. The star on a folder pins or unpins it, and the X unpins a folder from the list. Desktop, Documents, Downloads, Pictures, Music, and Videos start pinned.
+The search control sits on the Home bar, to the right of Two panes. It is a box that says Search, with a magnifying glass. Click it and the box opens so you can type. It filters the folder you have open. Click away with nothing typed, or press Escape, and it closes. Refresh sits next to the path. Check boxes sit beside each name and can select more than one file or folder at a time. Pinned and Recent are at the top of the folder tree, and each can be folded. Pinned starts open. Folding it in one pane leaves the other pane as it was. The star on a folder pins or unpins it, and the X unpins a folder from the list. Desktop, Documents, Downloads, Pictures, Music, and Videos start pinned.
 
 Refresh reads the open folder again and measures every folder size. On This computer, Refresh and clicking This computer update each drive's used space without opening the drive.
 
@@ -33,7 +33,9 @@ Info measures the selected file or folder and shows the exact size in bytes. Rec
 
 Drives you can see are mounted. Show every drive, in the Drives menu, lists the rest. That menu also mounts a drive that is waiting for a letter, maps a network drive, adds a network location, and disconnects a network drive.
 
-A snapshot asks where to save the copy. Leave the folder blank to keep it on this PC, or choose a folder on an external drive. Keeps, the tab between Recovery and Help, lists each saved copy. User folders can copy Desktop, Documents, Downloads, Pictures, Music, and Videos, and it asks where to save them because that can use a lot of space. Earlier copies is on the same Keeps tab. It reads restore points Windows already saved and copies files out of them. It is not a snapshot. If restore points have never been turned on, Keeps can turn them on. Windows asks for permission, sets aside some disk space on the drive you pick, and saves the first restore point.
+A snapshot asks where to save the copy. Leave the folder blank to keep it on this PC, or choose a folder on an external drive. Keeps, the tab between Find and Recovery, lists each saved copy. User folders can copy Desktop, Documents, Downloads, Pictures, Music, and Videos, and it asks where to save them because that can use a lot of space. Earlier copies is on the same Keeps tab. It reads restore points Windows already saved and copies files out of them. It is not a snapshot. If restore points have never been turned on, Keeps can turn them on. Windows asks for permission, sets aside some disk space on the drive you pick, and saves the first restore point.
+
+Decryption sits between Recovery and Help. A locked BitLocker drive opens with the recovery key, password, or key file you already have. Data Finder does not guess a missing key. If the drive is encrypted and you can already open it, Decrypt removes BitLocker and leaves the files. If it is not encrypted, Turn on BitLocker shows the recovery key, and Save the key writes that key into a text document on a different drive.
 
 About links open in the browser.
 
@@ -58,6 +60,7 @@ Select several files and folders, then open Details. Each item is listed with it
 - **Cut, Copy, Paste, Rename, Delete:** act on the selection.
 - **Sort and View:** sort the folder, and change icons, details, check boxes, and the Show list.
 - **Two panes:** sits to the right of View. It opens a second folder, then the button says One pane.
+- **Search:** sits at the right end of that same bar. The box says Search and has a magnifying glass. Click it to type.
 
 ## One pane and two panes
 

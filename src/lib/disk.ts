@@ -570,3 +570,37 @@ export async function restoreStatus(): Promise<RestoreStatus> {
 export async function restoreSetup(drive: string): Promise<string> {
   return invoke<string>("restore_setup", { drive });
 }
+
+export interface BitLockerDrive {
+  letter: string;
+  lock: string;
+  protection: string;
+  state: string;
+  percent: number;
+  volume: string;
+  protectors: string;
+}
+
+export async function bitlockerStatus(elevate: boolean): Promise<BitLockerDrive[]> {
+  return invoke<BitLockerDrive[]>("bitlocker_status", { elevate });
+}
+
+export async function bitlockerUnlock(drive: string, mode: "recovery" | "password" | "bek", secret: string): Promise<string> {
+  return invoke<string>("bitlocker_unlock", { drive, mode, secret });
+}
+
+export async function bitlockerOff(drive: string): Promise<string> {
+  return invoke<string>("bitlocker_off", { drive });
+}
+
+export async function bitlockerOn(drive: string): Promise<string> {
+  return invoke<string>("bitlocker_on", { drive });
+}
+
+export async function bitlockerSaveKey(folder: string, drive: string, key: string): Promise<string> {
+  return invoke<string>("bitlocker_save_key", { folder, drive, key });
+}
+
+export async function chooseKeyFile(): Promise<string> {
+  return invoke<string>("choose_key_file");
+}

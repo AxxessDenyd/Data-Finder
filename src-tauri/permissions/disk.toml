@@ -35,4 +35,10 @@ commands.allow = [
   "earlier_copy",
   "restore_status",
   "restore_setup",
+  "bitlocker_status",
+  "bitlocker_unlock",
+  "bitlocker_off",
+  "bitlocker_on",
+  "bitlocker_save_key",
+  "choose_key_file",
 ]

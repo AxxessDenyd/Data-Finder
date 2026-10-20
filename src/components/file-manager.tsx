@@ -73,7 +73,7 @@ import {
   type ViewMode,
 } from "@/lib/file-store";
 import { childrenOf, driveCaption, formatDate, formatSize, pathIds, resolvePath, typeLabel, type FsNode } from "@/lib/vfs";
-import { chooseFolder, diskPath, earlierCopy, earlierEntries, earlierList, isDesktop, isDiskId, listSnapshots, mapNetwork, measurePath, mountVolume, openExternal, recoveryClear, recoverySave, recoveryStart, recoveryStatus, recoveryStop, removeSnapshot, restoreSetup, restoreSnapshot, restoreStatus, withoutDisk, type DiskSnapshot, type EarlierCopy, type EarlierEntry, type ExactSize, type RecoveryStatus, type RestoreStatus } from "@/lib/disk";
+import { bitlockerOff, bitlockerOn, bitlockerSaveKey, bitlockerStatus, bitlockerUnlock, chooseFolder, chooseKeyFile, diskPath, earlierCopy, earlierEntries, earlierList, isDesktop, isDiskId, listSnapshots, mapNetwork, measurePath, mountVolume, openExternal, recoveryClear, recoverySave, recoveryStart, recoveryStatus, recoveryStop, removeSnapshot, restoreSetup, restoreSnapshot, restoreStatus, withoutDisk, type BitLockerDrive, type DiskSnapshot, type EarlierCopy, type EarlierEntry, type ExactSize, type RecoveryStatus, type RestoreStatus } from "@/lib/disk";
 import { aboutInfo, manualSections } from "@/lib/manual";
 
 const UI_KEY = "data-finder-ui";
@@ -440,8 +440,9 @@ function TabRow() {
   const tabs: Array<[RibbonTab, string]> = [
     ["home", "Home"],
     ["inspect", "Find"],
-    ["recovery", "Recovery"],
     ["keeps", "Keeps"],
+    ["recovery", "Recovery"],
+    ["decrypt", "Decryption"],
     ["resources", "Help"],
   ];
   const go = (id: RibbonTab) => useFiles.getState().setTab(id);
@@ -472,7 +473,6 @@ function TabRow() {
           {label}
         </button>
       ))}
-      <HeaderSearch />
       {reading && (
         <button type="button" className="mb-1 ml-auto shrink-0 px-2 text-xs text-tab-ink" onClick={() => useFiles.getState().setOptions({ reading: false })}>
           Exit reading
@@ -488,8 +488,9 @@ function Ribbon() {
     <div className="shrink-0 border-b border-ribbon-edge bg-ribbon">
       {tab === "home" && <HomeRibbon />}
       {tab === "inspect" && <InspectRibbon />}
-      {tab === "recovery" && <RecoveryRibbon />}
       {tab === "keeps" && <KeepsRibbon />}
+      {tab === "recovery" && <RecoveryRibbon />}
+      {tab === "decrypt" && <DecryptionRibbon />}
       {tab === "tools" && <ToolsRibbon />}
       {tab === "options" && <OptionsRibbon />}
       {tab === "resources" && <ResourcesRibbon />}
@@ -677,6 +678,9 @@ function HomeRibbon() {
       <SortMenu />
       <ViewMenu />
       <RibbonButton label={split ? "One pane" : "Two panes"} icon={<Columns2 className="size-4" />} onClick={() => store().toggleSplit()} />
+      <div className="ml-auto flex shrink-0 items-center pl-2">
+        <HeaderSearch />
+      </div>
     </div>
   );
 }
@@ -3046,6 +3050,130 @@ function NotePane({ id }: { id: string }) {
   );
 }
 
+function driveWords(drive: BitLockerDrive) {
+  if (drive.lock === "Locked") return "Locked";
+  if (drive.state === "DecryptionInProgress") return `Decrypting · ${drive.percent}%`;
+  if (drive.state === "EncryptionInProgress") return `Encrypting · ${drive.percent}%`;
+  if (drive.state === "DecryptionPaused" || drive.state === "EncryptionPaused") return `Paused · ${drive.percent}% encrypted`;
+  if (drive.state === "FullyEncrypted" || drive.protection === "On" || drive.percent > 0) return "Encrypted, and you can open it";
+  return "Not encrypted";
+}
+
+function stillEncrypted(drive: BitLockerDrive) {
+  return drive.lock === "Locked" || drive.protection === "On" || drive.percent > 0 || drive.state === "FullyEncrypted" || drive.state.includes("Progress") || drive.state.includes("Paused");
+}
+
+function DecryptionRibbon() {
+  return (
+    <div className="flex items-center px-3 py-2 text-sm text-muted">
+      Unlock a BitLocker drive with its key, decrypt one Windows already opened, or turn BitLocker on and save the key.
+    </div>
+  );
+}
+
+function DecryptionPage() {
+  const [rows, setRows] = useState<BitLockerDrive[] | null>(null);
+  const [letter, setLetter] = useState("");
+  const [error, setError] = useState("");
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [mode, setMode] = useState<"recovery" | "password" | "bek">("recovery");
+  const [secret, setSecret] = useState("");
+  const [key, setKey] = useState("");
+  const [keyDrive, setKeyDrive] = useState("");
+  const [asked, setAsked] = useState(false);
+  const load = (elevate: boolean) => {
+    void bitlockerStatus(elevate).then((items) => {
+      setRows(items);
+      setError("");
+      setLetter((current) => current && items.some((item) => item.letter === current) ? current : items[0]?.letter ?? "");
+    }).catch((cause: unknown) => {
+      setRows([]);
+      setError(cause instanceof Error ? cause.message : "Could not read BitLocker");
+    });
+  };
+  useEffect(() => {
+    if (isDesktop()) load(false);
+  }, []);
+  const current = rows?.find((item) => item.letter === letter) ?? null;
+  const locked = current?.lock === "Locked";
+  const encrypted = current ? stillEncrypted(current) : false;
+  const run = (work: Promise<string>, after?: (message: string) => void) => {
+    setBusy(true);
+    setNote("");
+    void work
+      .then((message) => {
+        if (after) after(message);
+        else setNote(message);
+        load(false);
+      })
+      .catch((cause: unknown) => setNote(cause instanceof Error ? cause.message : "Windows could not finish that"))
+      .finally(() => setBusy(false));
+  };
+  if (!isDesktop()) {
+    return <div className="flex flex-1 items-center justify-center p-6 text-sm text-muted">Decryption runs in the Windows program, not in the browser copy.</div>;
+  }
+  return (
+    <div className="flex min-h-0 flex-1 flex-col overflow-auto p-4">
+      <h2 className="text-lg font-semibold">Decryption</h2>
+      <p className="mt-1 max-w-3xl text-sm text-muted">A locked drive opens when you enter its recovery key, password, or key file. Data Finder does not guess that key. If Windows already unlocked the drive, Decrypt removes BitLocker and leaves the files in place. A drive that is not encrypted can be turned on, and the recovery key is shown so you can keep it in a document.</p>
+      {error && <p className="mt-3 text-sm text-danger">{error}</p>}
+      {error && !asked && <button type="button" className="mt-2 min-h-11 self-start border border-line px-3 text-sm" onClick={() => { setAsked(true); load(true); }}>Give Windows permission</button>}
+      <div className="mt-4 flex flex-wrap items-end gap-3">
+        <label className="text-sm">
+          <span className="mb-1 block text-muted">Drive</span>
+          <select value={letter} onChange={(e) => { setLetter(e.target.value); setKey(""); setNote(""); }} aria-label="BitLocker drive" className="h-9 min-w-24 rounded-md border border-line bg-pane px-2">
+            {(rows ?? []).map((item) => <option key={item.letter} value={item.letter}>{item.letter}:</option>)}
+          </select>
+        </label>
+        <button type="button" className="h-9 rounded-md border border-line px-3 text-sm" onClick={() => load(false)}>Refresh</button>
+        {current && <p className="pb-1 text-sm">{driveWords(current)}{current.volume ? ` · ${current.volume}` : ""}</p>}
+      </div>
+      {rows === null && !error && <p className="mt-4 text-sm text-muted">Reading drives…</p>}
+      {rows?.length === 0 && !error && <p className="mt-4 text-sm text-muted">Windows did not report a BitLocker drive.</p>}
+      {current && locked && (
+        <form className="mt-4 max-w-xl" onSubmit={(e) => { e.preventDefault(); run(bitlockerUnlock(current.letter, mode, secret)); }}>
+          <p className="text-sm">This drive is locked. Enter the key that belongs to it.</p>
+          <div className="mt-3 flex flex-wrap gap-3 text-sm">
+            <label className="flex items-center gap-1.5"><input type="radio" name="key-kind" checked={mode === "recovery"} onChange={() => setMode("recovery")} />Recovery key</label>
+            <label className="flex items-center gap-1.5"><input type="radio" name="key-kind" checked={mode === "password"} onChange={() => setMode("password")} />Password</label>
+            <label className="flex items-center gap-1.5"><input type="radio" name="key-kind" checked={mode === "bek"} onChange={() => setMode("bek")} />Key file</label>
+          </div>
+          {mode === "bek" ? (
+            <div className="mt-3 flex gap-2">
+              <input value={secret} onChange={(e) => setSecret(e.target.value)} placeholder="D:\key.bek" aria-label="Key file" className="h-11 min-w-0 flex-1 border border-line px-2 text-sm" />
+              <button type="button" className="min-h-11 border border-line px-3 text-sm" onClick={() => void chooseKeyFile().then(setSecret).catch((cause: unknown) => setNote(cause instanceof Error ? cause.message : "No key file was chosen"))}>Choose file</button>
+            </div>
+          ) : (
+            <input value={secret} onChange={(e) => setSecret(e.target.value)} type={mode === "password" ? "password" : "text"} placeholder={mode === "recovery" ? "000000-000000-000000-000000-000000-000000-000000-000000" : "Password"} aria-label={mode === "recovery" ? "Recovery key" : "Password"} className="mt-3 h-11 w-full border border-line px-2 text-sm" />
+          )}
+          <button type="submit" className="mt-3 min-h-11 bg-accent px-3 text-sm text-accent-ink disabled:opacity-40" disabled={busy || !secret.trim()}>Unlock</button>
+        </form>
+      )}
+      {current && !locked && encrypted && (
+        <div className="mt-4 max-w-xl">
+          <p className="text-sm">You can already open this drive. Decrypt takes BitLocker off. The files stay. It can take a long time, and Windows finishes it in the background.</p>
+          <button type="button" className="mt-3 min-h-11 bg-accent px-3 text-sm text-accent-ink disabled:opacity-40" disabled={busy} onClick={() => run(bitlockerOff(current.letter))}>Decrypt</button>
+        </div>
+      )}
+      {current && !locked && !encrypted && (
+        <div className="mt-4 max-w-xl">
+          <p className="text-sm">This drive is not encrypted. Turn BitLocker on and Data Finder will show the recovery key. Save that key in a document that is not on this drive.</p>
+          <button type="button" className="mt-3 min-h-11 bg-accent px-3 text-sm text-accent-ink disabled:opacity-40" disabled={busy} onClick={() => run(bitlockerOn(current.letter), (next) => { setKey(next); setKeyDrive(current.letter); setNote("BitLocker is on. Save this recovery key in a document."); })}>Turn on BitLocker</button>
+        </div>
+      )}
+      {key && (
+        <div className="mt-4 max-w-xl border border-line p-3">
+          <p className="text-sm font-semibold">Recovery key</p>
+          <input readOnly value={key} aria-label="Recovery key" className="mt-2 h-11 w-full border border-line bg-pane px-2 font-mono text-sm" />
+          <button type="button" className="mt-3 min-h-11 border border-line px-3 text-sm" disabled={busy || !keyDrive} onClick={() => void chooseFolder().then((folder) => bitlockerSaveKey(folder, keyDrive, key)).then((path) => setNote(`Key saved · ${path}`)).catch((cause: unknown) => setNote(cause instanceof Error ? cause.message : "Could not save the key"))}>Save the key</button>
+        </div>
+      )}
+      {note && <p className="mt-3 max-w-xl text-sm">{note}</p>}
+    </div>
+  );
+}
+
 function RecoveryRibbon() {
   return (
     <div className="flex items-center px-3 py-2 text-sm text-muted">
@@ -3219,14 +3347,14 @@ function HeaderSearch() {
   }, [open]);
   if (!expanded) {
     return (
-      <button type="button" className="mb-1 ml-1 flex h-8 items-center gap-1.5 rounded-md border border-line bg-pane px-2.5 text-sm" onClick={() => setOpen(true)}>
+      <button type="button" className="flex h-8 items-center gap-1.5 rounded-md border border-line bg-pane px-2.5 text-sm" onClick={() => setOpen(true)}>
         <Search className="size-3.5" />
         Search
       </button>
     );
   }
   return (
-    <label className="mb-1 ml-1 flex h-8 w-56 items-center gap-1 rounded-md border border-line bg-pane px-2">
+    <label className="flex h-8 w-56 items-center gap-1 rounded-md border border-line bg-pane px-2">
       <Search className="size-3.5 shrink-0 text-muted" />
       <input
         ref={box}
@@ -3426,6 +3554,8 @@ export function FileManager() {
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         {tab === "resources" ? (
           helpPage === "about" ? <AboutPage /> : <ManualPage />
+        ) : tab === "decrypt" ? (
+          <DecryptionPage />
         ) : tab === "recovery" ? (
           <RecoveryPage />
         ) : tab === "keeps" ? (
