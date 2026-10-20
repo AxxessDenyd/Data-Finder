@@ -10,7 +10,7 @@ export const aboutInfo = {
   created: "October 2026",
   author: "William Schneider",
   updated: "October 20, 2026",
-  version: "0.2.9",
+  version: "0.2.10",
   latest: "https://github.com/AxxessDenyd/Data-Finder/releases/latest",
   setup: "https://github.com/AxxessDenyd/Data-Finder/releases/latest/download/Data-Finder-Setup.exe",
   portable: "https://github.com/AxxessDenyd/Data-Finder/releases/latest/download/Data-Finder.exe",
@@ -139,7 +139,7 @@ export const manualSections: ManualSection[] = [
     title: "Decryption",
     items: [
       "Decryption is the tab between Recovery and Help. It works with BitLocker on the drives Windows can see.",
-      "A locked drive opens only with its recovery key, password, or key file. Type the recovery key, or choose the key file, then click Unlock. Data Finder does not guess or break a missing key.",
+      "A locked drive shows its Key ID, eight characters. That is the same ID as on the blue BitLocker screen. Copy it and match it to the recovery key. The key for a different ID will not open the drive. Unlock still needs the recovery key, password, or key file. Data Finder does not guess or break a missing key.",
       "Where to find the key lists Personal, School, Work, Active Directory, Intune, and No key at all. A recovery key is 48 digits. The blue BitLocker screen shows a Key ID of eight characters, and the key has to match that ID.",
       "Personal keys are on the Microsoft account that was used on that PC, or on a printed page, a USB stick, or a saved text file. School and work keys are held by that organization's help desk. Active Directory stores a key on the computer object when Group Policy saved it. Intune stores a key when the disk encryption policy saves it to Entra ID. An admin reads it. A student or employee usually cannot.",
       "If the drive is encrypted and you can already open it, such as C: after you sign in, Read the key shows a recovery password Windows already stored. Decrypt removes BitLocker. The files stay. Windows finishes the work in the background.",

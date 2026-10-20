@@ -3068,7 +3068,7 @@ function stillEncrypted(drive: BitLockerDrive) {
 function DecryptionRibbon() {
   return (
     <div className="flex items-center px-3 py-2 text-sm text-muted">
-      Unlock a drive with a key you already have, or follow the list for where that key is kept.
+      A locked drive shows its Key ID. Unlock it with the key that matches that ID.
     </div>
   );
 }
@@ -3143,6 +3143,48 @@ const KEY_PLACES: Array<{ id: KeyPlace; label: string; steps: string[]; links?: 
     ],
   },
 ];
+
+function keyIdList(raw: string) {
+  return raw.split(",").map((item) => item.trim().toUpperCase()).filter((item) => /^[0-9A-F]{8}$/.test(item));
+}
+
+function KeyIdRow({ ids, onElevate }: { ids: string; onElevate?: () => void }) {
+  const list = keyIdList(ids);
+  const [copied, setCopied] = useState(false);
+  const copy = () => {
+    const text = list.join(", ");
+    const done = () => {
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    };
+    void navigator.clipboard.writeText(text).then(done).catch(() => {
+      const area = document.createElement("textarea");
+      area.value = text;
+      document.body.appendChild(area);
+      area.select();
+      document.execCommand("copy");
+      area.remove();
+      done();
+    });
+  };
+  if (list.length === 0) {
+    return (
+      <div className="mt-3">
+        <p className="text-sm">Windows did not show a recovery key ID. Read the eight characters on the blue BitLocker screen, or give Windows permission and look again.</p>
+        {onElevate && <button type="button" className="mt-2 min-h-11 border border-line px-3 text-sm" onClick={onElevate}>Give Windows permission</button>}
+      </div>
+    );
+  }
+  return (
+    <div className="mt-3">
+      <p className="text-sm">Key ID. This is the eight characters on the blue BitLocker screen. The recovery key has to match it.</p>
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        {list.map((id) => <span key={id} className="border border-line bg-pane px-2 py-2 font-mono text-sm">{id}</span>)}
+        <button type="button" className="min-h-11 border border-line px-3 text-sm" onClick={copy}>{copied ? "Copied" : "Copy"}</button>
+      </div>
+    </div>
+  );
+}
 
 function presentReadKeys(raw: string) {
   return raw
@@ -3239,7 +3281,12 @@ function DecryptionPage() {
     return (
       <div className="flex min-h-0 flex-1 flex-col overflow-auto p-4">
         <h2 className="text-lg font-semibold">Decryption</h2>
-        <p className="mt-1 max-w-3xl text-sm text-muted">Unlock, decrypt, and turn BitLocker on run in the Windows program. The list below is where a recovery key is kept, and what is left when it cannot be found.</p>
+        <p className="mt-1 max-w-3xl text-sm text-muted">Unlock, decrypt, and turn BitLocker on run in the Windows program. A locked drive shows its Key ID there. The example below is the eight characters you match to a recovery key.</p>
+        <div className="mt-4 max-w-xl border border-line p-3">
+          <p className="text-sm font-semibold">Example</p>
+          <p className="mt-1 text-sm">This drive is locked. Enter the key that belongs to it.</p>
+          <KeyIdRow ids="A1B2C3D4" />
+        </div>
         <KeyGuide />
       </div>
     );
@@ -3265,6 +3312,7 @@ function DecryptionPage() {
       {current && locked && (
         <form className="mt-4 max-w-xl" onSubmit={(e) => { e.preventDefault(); run(bitlockerUnlock(current.letter, mode, secret)); }}>
           <p className="text-sm">This drive is locked. Enter the key that belongs to it.</p>
+          <KeyIdRow ids={current.keyIds} onElevate={() => { setAsked(true); load(true); }} />
           <div className="mt-3 flex flex-wrap gap-3 text-sm">
             <label className="flex items-center gap-1.5"><input type="radio" name="key-kind" checked={mode === "recovery"} onChange={() => setMode("recovery")} />Recovery key</label>
             <label className="flex items-center gap-1.5"><input type="radio" name="key-kind" checked={mode === "password"} onChange={() => setMode("password")} />Password</label>

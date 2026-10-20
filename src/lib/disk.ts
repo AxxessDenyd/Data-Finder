@@ -579,6 +579,7 @@ export interface BitLockerDrive {
   percent: number;
   volume: string;
   protectors: string;
+  keyIds: string;
 }
 
 export async function bitlockerStatus(elevate: boolean): Promise<BitLockerDrive[]> {

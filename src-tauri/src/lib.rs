@@ -1777,6 +1777,7 @@ struct BitLockerDrive {
     percent: u32,
     volume: String,
     protectors: String,
+    keyIds: String,
 }
 
 fn parse_bitlocker_line(line: &str) -> Option<BitLockerDrive> {
@@ -1794,6 +1795,7 @@ fn parse_bitlocker_line(line: &str) -> Option<BitLockerDrive> {
         percent,
         volume: parts[5].trim().to_string(),
         protectors: parts[6].trim().to_string(),
+        keyIds: parts.get(7).copied().unwrap_or("").trim().to_string(),
     })
 }
 
@@ -1802,8 +1804,19 @@ fn bitlocker_status(elevate: bool) -> Result<Vec<BitLockerDrive>, String> {
     let body = r#"$lines = New-Object System.Collections.Generic.List[string]
 foreach ($vol in @(Get-BitLockerVolume)) {
   $kinds = @($vol.KeyProtector | ForEach-Object { [string]$_.KeyProtectorType }) -join ','
+  $idList = New-Object System.Collections.Generic.List[string]
+  foreach ($prot in @($vol.KeyProtector)) {
+    $kind = [string]$prot.KeyProtectorType
+    if ($kind -ne 'RecoveryPassword' -and $kind -ne 'NumericalPassword') { continue }
+    $hex = (([string]$prot.KeyProtectorId) -replace '[{}\-]', '').ToUpper()
+    if ($hex.Length -ge 8) {
+      $short = $hex.Substring(0, 8)
+      if (-not $idList.Contains($short)) { [void]$idList.Add($short) }
+    }
+  }
+  $ids = $idList -join ','
   $mount = [string]$vol.MountPoint
-  $lines.Add(($mount + '|' + [string]$vol.LockStatus + '|' + [string]$vol.ProtectionStatus + '|' + [string]$vol.VolumeStatus + '|' + [string]$vol.EncryptionPercentage + '|' + [string]$vol.VolumeType + '|' + $kinds))
+  $lines.Add(($mount + '|' + [string]$vol.LockStatus + '|' + [string]$vol.ProtectionStatus + '|' + [string]$vol.VolumeStatus + '|' + [string]$vol.EncryptionPercentage + '|' + [string]$vol.VolumeType + '|' + $kinds + '|' + $ids))
 }
 if ($lines.Count -eq 0) { Save 'none' } else { Save ($lines -join [char]10) }
 "#;
