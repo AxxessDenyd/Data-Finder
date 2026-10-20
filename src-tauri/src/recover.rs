@@ -53,6 +53,7 @@ enum Payload {
         size: u64,
         ext: String,
     },
+    Folder,
 }
 
 struct Stored {
@@ -134,8 +135,13 @@ pub fn clear() -> Result<(), String> {
     Ok(())
 }
 
-pub fn start(letter: String, kinds: Vec<String>, deep: bool) -> Result<(), String> {
+pub fn start(letter: String, kinds: Vec<String>, deep: bool, name: String) -> Result<(), String> {
     let letter = normalize_letter(&letter).ok_or_else(|| "Choose a drive letter".to_string())?;
+    let needle = name.trim();
+    if needle.chars().any(|ch| ch.is_control()) || needle.len() > 180 {
+        return Err("That name cannot be used".into());
+    }
+    let needle = needle.to_string();
     {
         let run = state().lock().unwrap_or_else(|err| err.into_inner());
         if run.running {
@@ -148,7 +154,7 @@ pub fn start(letter: String, kinds: Vec<String>, deep: bool) -> Result<(), Strin
         let mut run = state().lock().unwrap_or_else(|err| err.into_inner());
         run.running = true;
         run.done = false;
-        run.phase = "Starting".into();
+        run.phase = if needle.is_empty() { "Starting".into() } else { format!("Looking for {needle}") };
         run.scanned_mb = 0;
         run.total_mb = 0;
         run.error.clear();
@@ -158,7 +164,7 @@ pub fn start(letter: String, kinds: Vec<String>, deep: bool) -> Result<(), Strin
     thread::spawn(move || {
         let finish = Finish;
         let _ = finish;
-        if let Err(err) = scan(&letter, &allow, deep) {
+        if let Err(err) = scan(&letter, &allow, deep && needle.is_empty(), &needle) {
             let mut run = state().lock().unwrap_or_else(|poison| poison.into_inner());
             if run.error.is_empty() {
                 run.error = err;
@@ -191,9 +197,18 @@ fn set_phase(phase: &str, scanned_mb: u64, total_mb: u64) {
     run.total_mb = total_mb;
 }
 
-fn scan(letter: &str, allow: &HashSet<String>, deep: bool) -> Result<(), String> {
-    set_phase("Reading the Recycle Bin", 0, 0);
-    match recycle_hits(letter, allow) {
+fn name_matches(needle: &str, name: &str, original: &str) -> bool {
+    let needle = needle.trim();
+    if needle.is_empty() {
+        return true;
+    }
+    let needle = needle.to_lowercase();
+    name.to_lowercase().contains(&needle) || original.to_lowercase().contains(&needle)
+}
+
+fn scan(letter: &str, allow: &HashSet<String>, deep: bool, needle: &str) -> Result<(), String> {
+    set_phase(if needle.is_empty() { "Reading the Recycle Bin" } else { "Looking in the Recycle Bin" }, 0, 0);
+    match recycle_hits(letter, allow, needle) {
         Ok(found) => {
             for hit in found {
                 push_hit(hit);
@@ -209,7 +224,7 @@ fn scan(letter: &str, allow: &HashSet<String>, deep: bool) -> Result<(), String>
     }
     #[cfg(windows)]
     {
-        if let Err(err) = scan_volume(letter, allow, deep) {
+        if let Err(err) = scan_volume(letter, allow, deep, needle) {
             let mut run = state().lock().unwrap_or_else(|poison| poison.into_inner());
             if run.error.is_empty() {
                 run.error = err;
@@ -220,14 +235,14 @@ fn scan(letter: &str, allow: &HashSet<String>, deep: bool) -> Result<(), String>
     }
     #[cfg(not(windows))]
     {
-        let _ = (letter, allow, deep);
+        let _ = (letter, allow, deep, needle);
         let mut run = state().lock().unwrap_or_else(|poison| poison.into_inner());
         run.error = "Deleted-file scan runs in the Windows program".into();
     }
     Ok(())
 }
 
-fn recycle_hits(letter: &str, allow: &HashSet<String>) -> Result<Vec<Stored>, String> {
+fn recycle_hits(letter: &str, allow: &HashSet<String>, needle: &str) -> Result<Vec<Stored>, String> {
     let root = PathBuf::from(format!("{letter}:\\$Recycle.Bin"));
     let mut out = Vec::new();
     let entries = match fs::read_dir(&root) {
@@ -255,14 +270,32 @@ fn recycle_hits(letter: &str, allow: &HashSet<String>) -> Result<Vec<Stored>, St
                 continue;
             }
             let Some(info) = parse_recycle_info(&bytes) else { continue };
+            let data_name = format!("$R{}", &name[2..]);
+            let data_path = folder.join(data_name);
+            let file_name = info.path.rsplit(['\\', '/']).next().unwrap_or(&info.path).to_string();
+            if !name_matches(needle, &file_name, &info.path) {
+                continue;
+            }
+            if data_path.is_dir() {
+                out.push(Stored {
+                    hit: RecoveryHit {
+                        id: next_id(),
+                        name: file_name,
+                        original: info.path,
+                        bytes: info.size,
+                        kind: "Folder".into(),
+                        chance: "Excellent".into(),
+                        source: "Recycle Bin".into(),
+                    },
+                    payload: Payload::Recycle(data_path),
+                });
+                continue;
+            }
             let kind = kind_of(&info.path);
             if !allowed(&kind, allow) {
                 continue;
             }
-            let data_name = format!("$R{}", &name[2..]);
-            let data_path = folder.join(data_name);
             let chance = if data_path.is_file() { "Excellent" } else { "Poor" };
-            let file_name = info.path.rsplit(['\\', '/']).next().unwrap_or(&info.path).to_string();
             out.push(Stored {
                 hit: RecoveryHit {
                     id: next_id(),
@@ -400,18 +433,44 @@ fn clone_payload(payload: &Payload) -> Payload {
             size: *size,
             ext: ext.clone(),
         },
+        Payload::Folder => Payload::Folder,
     }
+}
+
+fn copy_tree(from: &Path, to: &Path, depth: u32) -> Result<(), String> {
+    if depth > 32 {
+        return Err("That folder is too deep to copy".into());
+    }
+    fs::create_dir_all(to).map_err(|err| err.to_string())?;
+    for entry in fs::read_dir(from).map_err(|err| err.to_string())? {
+        let entry = entry.map_err(|err| err.to_string())?;
+        let file_type = entry.file_type().map_err(|err| err.to_string())?;
+        if file_type.is_symlink() {
+            continue;
+        }
+        let dest = to.join(entry.file_name());
+        if file_type.is_dir() {
+            copy_tree(&entry.path(), &dest, depth + 1)?;
+        } else if file_type.is_file() {
+            fs::copy(entry.path(), dest).map_err(|err| err.to_string())?;
+        }
+    }
+    Ok(())
 }
 
 fn write_payload(payload: &Payload, dest: &Path, bytes: u64) -> Result<(), String> {
     match payload {
         Payload::Recycle(path) => {
+            if path.is_dir() {
+                return copy_tree(path, dest, 0);
+            }
             if !path.is_file() {
                 return Err("The Recycle Bin copy is gone".into());
             }
             fs::copy(path, dest).map_err(|err| err.to_string())?;
             Ok(())
         }
+        Payload::Folder => fs::create_dir_all(dest).map_err(|err| err.to_string()),
         Payload::Resident(data) => {
             let mut file = File::create(dest).map_err(|err| err.to_string())?;
             file.write_all(data).map_err(|err| err.to_string())
@@ -575,8 +634,8 @@ fn wide(text: &str) -> Vec<u16> {
 }
 
 #[cfg(windows)]
-fn scan_volume(letter: &str, allow: &HashSet<String>, deep: bool) -> Result<(), String> {
-    set_phase("Reading deleted file records", 0, 0);
+fn scan_volume(letter: &str, allow: &HashSet<String>, deep: bool, needle: &str) -> Result<(), String> {
+    set_phase(if needle.is_empty() { "Reading deleted file records" } else { "Looking for that deleted name" }, 0, 0);
     let volume = Volume::open(letter)?;
     let mut boot = vec![0u8; 512];
     if !volume.read_at(0, &mut boot) || &boot[3..11] != b"NTFS    " {
@@ -592,7 +651,7 @@ fn scan_volume(letter: &str, allow: &HashSet<String>, deep: bool) -> Result<(), 
     let record_size = record_size(boot[0x40] as i8, cluster);
     let total_sectors = u64::from_le_bytes(boot[0x28..0x30].try_into().unwrap_or([0; 8]));
     let total_bytes = total_sectors.saturating_mul(sector as u64);
-    set_phase("Reading deleted file records", 0, total_bytes / (1024 * 1024));
+    set_phase(if needle.is_empty() { "Reading deleted file records" } else { "Looking for that deleted name" }, 0, total_bytes / (1024 * 1024));
     let mft_offset = (mft_cluster as u64).saturating_mul(cluster as u64);
     let mut record0 = vec![0u8; record_size as usize];
     if !volume.read_at(mft_offset, &mut record0) || !apply_fixup(&mut record0, sector as usize) {
@@ -600,7 +659,7 @@ fn scan_volume(letter: &str, allow: &HashSet<String>, deep: bool) -> Result<(), 
     }
     let mft_runs = data_runs(&record0);
     let names = collect_names(&volume, &mft_runs, cluster, record_size, sector);
-    collect_deleted(&volume, &mft_runs, cluster, record_size, sector, letter, allow, &names);
+    collect_deleted(&volume, &mft_runs, cluster, record_size, sector, letter, allow, &names, needle);
     if deep && !cancel_flag().load(Ordering::Relaxed) {
         let bitmap = read_bitmap(&volume, &names, cluster, record_size, sector, &mft_runs);
         if bitmap.is_empty() {
@@ -846,11 +905,12 @@ fn collect_deleted(
     letter: &str,
     allow: &HashSet<String>,
     names: &HashMap<u64, (u64, String)>,
+    needle: &str,
 ) {
     let volume_path = format!("\\\\.\\{letter}:");
     for_each_record(volume, runs, cluster, record_size, sector, |index, record| {
         if index > 0 && index % 8192 == 0 {
-            set_phase("Reading deleted file records", index / 1024, 0);
+            set_phase(if needle.is_empty() { "Reading deleted file records" } else { "Looking for that deleted name" }, index / 1024, 0);
             let count = state().lock().unwrap_or_else(|err| err.into_inner()).hits.len();
             if count >= 4000 {
                 return false;
@@ -859,7 +919,11 @@ fn collect_deleted(
         if !apply_fixup(record, sector as usize) {
             return true;
         }
-        if record.len() <= 0x17 || (record[0x16] & 0x01) != 0 || (record[0x16] & 0x02) != 0 {
+        if record.len() <= 0x17 || (record[0x16] & 0x01) != 0 {
+            return true;
+        }
+        let directory = (record[0x16] & 0x02) != 0;
+        if directory && needle.is_empty() {
             return true;
         }
         let mut filename: Option<FileName> = None;
@@ -884,12 +948,30 @@ fn collect_deleted(
         if file.name.starts_with('$') {
             return true;
         }
+        let original = format!("{letter}:\\{}", build_path(names, file.parent, &file.name));
+        if !name_matches(needle, &file.name, &original) {
+            return true;
+        }
+        if directory {
+            push_hit(Stored {
+                hit: RecoveryHit {
+                    id: next_id(),
+                    name: file.name,
+                    original,
+                    bytes: file.real_size,
+                    kind: "Folder".into(),
+                    chance: "Good".into(),
+                    source: "Deleted".into(),
+                },
+                payload: Payload::Folder,
+            });
+            return true;
+        }
         let kind = kind_of(&file.name);
         if !allowed(&kind, allow) {
             return true;
         }
         let size = if data_size == 0 { file.real_size } else { data_size };
-        let original = format!("{letter}:\\{}", build_path(names, file.parent, &file.name));
         let (chance, payload) = if let Some(data) = resident {
             ("Excellent".into(), Payload::Resident(data))
         } else if runs_cover(&runs_found, cluster, size) {

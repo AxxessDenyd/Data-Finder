@@ -29,7 +29,7 @@ Recovery's Choose folder button opens a window for the folder where recovered fi
 
 View, then Show, includes Hidden items, Read-only items, System items, and No access folders. No access folders starts unchecked. Check it to show folders Windows will not open, in the file list and in the folder tree. The Show menu stays open while the pointer moves onto it.
 
-Info measures the selected file or folder and shows the exact size in bytes. Recovery scans a drive for deleted files and saves the ones you pick onto a different drive. Deep scan also searches free space. Run Data Finder as administrator if a scan cannot read the drive.
+Info measures the selected file or folder and shows the exact size in bytes. Recovery scans a drive for deleted files and saves the ones you pick onto a different drive. Look for can scan for one deleted file or folder by name, including files that were inside that folder. Search the list narrows the results after they appear. Deep scan also searches free space. Run Data Finder as administrator if a scan cannot read the drive.
 
 Drives you can see are mounted. Show every drive, in the Drives menu, lists the rest. That menu also mounts a drive that is waiting for a letter, maps a network drive, adds a network location, and disconnects a network drive.
 

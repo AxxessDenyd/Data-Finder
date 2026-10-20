@@ -73,7 +73,7 @@ import {
   type ViewMode,
 } from "@/lib/file-store";
 import { childrenOf, driveCaption, formatDate, formatSize, pathIds, resolvePath, typeLabel, type FsNode } from "@/lib/vfs";
-import { bitlockerOff, bitlockerOn, bitlockerReadKey, bitlockerSaveKey, bitlockerStatus, bitlockerUnlock, chooseFolder, chooseKeyFile, diskPath, earlierCopy, earlierEntries, earlierList, isDesktop, isDiskId, listSnapshots, mapNetwork, measurePath, mountVolume, openExternal, recoveryClear, recoverySave, recoveryStart, recoveryStatus, recoveryStop, removeSnapshot, restoreSetup, restoreSnapshot, restoreStatus, withoutDisk, type BitLockerDrive, type DiskSnapshot, type EarlierCopy, type EarlierEntry, type ExactSize, type RecoveryStatus, type RestoreStatus } from "@/lib/disk";
+import { bitlockerOff, bitlockerOn, bitlockerReadKey, bitlockerSaveKey, bitlockerStatus, bitlockerUnlock, chooseFolder, chooseKeyFile, diskPath, earlierCopy, earlierEntries, earlierList, isDesktop, isDiskId, listSnapshots, mapNetwork, measurePath, mountVolume, openExternal, recoveryClear, recoverySave, recoveryStart, recoveryStatus, recoveryStop, removeSnapshot, restoreSetup, restoreSnapshot, restoreStatus, withoutDisk, type BitLockerDrive, type DiskSnapshot, type EarlierCopy, type EarlierEntry, type ExactSize, type RecoveryHit, type RecoveryStatus, type RestoreStatus } from "@/lib/disk";
 import { aboutInfo, manualSections } from "@/lib/manual";
 
 const UI_KEY = "data-finder-ui";
@@ -3387,7 +3387,7 @@ function DecryptionPage() {
 function RecoveryRibbon() {
   return (
     <div className="flex items-center px-3 py-2 text-sm text-muted">
-      Recovery copies deleted files into a folder you choose. The drive you scan is not changed.
+      Recovery copies deleted files into a folder you choose. Search the list, or scan for one deleted name.
     </div>
   );
 }
@@ -3417,12 +3417,26 @@ function KeepsPage() {
 
 const RECOVERY_KINDS = ["Pictures", "Documents", "Music", "Video", "Archives", "Email", "Other"];
 
+const PRACTICE_HITS: RecoveryHit[] = [
+  { id: 1, name: "Budget.xlsx", original: "C:\\Users\\Documents\\Budget.xlsx", bytes: 24000, kind: "Documents", chance: "Excellent", source: "Recycle Bin" },
+  { id: 2, name: "Photos", original: "C:\\Users\\Pictures\\Photos", bytes: 0, kind: "Folder", chance: "Good", source: "Deleted" },
+  { id: 3, name: "IMG_2201.jpg", original: "C:\\Users\\Pictures\\Photos\\IMG_2201.jpg", bytes: 2400000, kind: "Pictures", chance: "Good", source: "Deleted" },
+];
+
+function hitMatches(hit: RecoveryHit, query: string) {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return true;
+  return hit.name.toLowerCase().includes(needle) || hit.original.toLowerCase().includes(needle);
+}
+
 function RecoveryPage() {
   const nodes = useFiles((s) => s.nodes);
   const drives = Object.values(nodes).filter((node) => node.kind === "drive" && node.name.endsWith(":") && node.mounted !== false);
   const [letter, setLetter] = useState(drives.some((drive) => drive.name.startsWith("C")) ? "C" : (drives[0]?.name.replace(":", "") || "C"));
   const [kinds, setKinds] = useState<string[]>(RECOVERY_KINDS);
   const [deep, setDeep] = useState(false);
+  const [target, setTarget] = useState("");
+  const [query, setQuery] = useState("");
   const [status, setStatus] = useState<RecoveryStatus | null>(null);
   const [picked, setPicked] = useState<Record<number, boolean>>({});
   const [dest, setDest] = useState("");
@@ -3438,13 +3452,20 @@ function RecoveryPage() {
     const timer = window.setInterval(pull, 700);
     return () => { live = false; window.clearInterval(timer); };
   }, []);
-  const hits = status?.hits ?? [];
+  const practice = !isDesktop();
+  const hits = practice && (status?.hits.length ?? 0) === 0 ? PRACTICE_HITS : (status?.hits ?? []);
+  const shown = hits.filter((hit) => hitMatches(hit, query));
   const selected = hits.filter((hit) => picked[hit.id]);
   const toggleKind = (kind: string) => setKinds((current) => current.includes(kind) ? current.filter((item) => item !== kind) : [...current, kind]);
   const start = () => {
-    setNote("");
+    setNote(target.trim() && deep ? "Deep scan looks for files that have no name, so this scan uses the name instead." : "");
     setPicked({});
-    void recoveryStart(letter, kinds, deep).catch((error: unknown) => setNote(error instanceof Error ? error.message : "Could not start the scan"));
+    setQuery(target.trim());
+    if (practice) {
+      setNote("This example list can be searched. The scan itself runs in the Windows program.");
+      return;
+    }
+    void recoveryStart(letter, kinds, deep, target.trim()).catch((error: unknown) => setNote(error instanceof Error ? error.message : "Could not start the scan"));
   };
   const save = () => {
     if (!dest.trim()) {
@@ -3454,9 +3475,6 @@ function RecoveryPage() {
     setBusy(true);
     void recoverySave(selected.map((hit) => hit.id), dest.trim()).then((result) => setNote(result.message)).catch((error: unknown) => setNote(error instanceof Error ? error.message : "Could not save those files")).finally(() => setBusy(false));
   };
-  if (!isDesktop()) {
-    return <div className="flex flex-1 items-center justify-center p-6 text-sm text-muted">Recovery runs in the Windows program, not in the browser copy.</div>;
-  }
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex flex-wrap items-end gap-3 border-b border-line px-3 py-3">
@@ -3469,6 +3487,10 @@ function RecoveryPage() {
             })}
           </select>
         </label>
+        <label className="text-sm">
+          <span className="mb-1 block text-muted">Look for</span>
+          <input value={target} onChange={(e) => setTarget(e.target.value)} placeholder="Deleted file or folder" aria-label="Deleted file or folder" className="h-9 w-52 rounded-md border border-line bg-pane px-2" />
+        </label>
         <label className="flex h-9 items-center gap-2 text-sm">
           <input type="checkbox" checked={deep} onChange={(e) => setDeep(e.target.checked)} />
           Deep scan
@@ -3479,8 +3501,16 @@ function RecoveryPage() {
         <p className="min-w-0 flex-1 text-sm text-muted">
           {status?.phase || "Ready"}
           {status?.total_mb ? ` · ${status.scanned_mb} MB of ${status.total_mb} MB` : status?.scanned_mb ? ` · ${status.scanned_mb} MB` : ""}
-          {hits.length ? ` · ${hits.length} found` : ""}
+          {hits.length ? ` · ${query.trim() ? `${shown.length} of ${hits.length}` : hits.length} found` : ""}
         </p>
+      </div>
+      <div className="flex flex-wrap items-center gap-3 border-b border-line px-3 py-2">
+        <label className="flex h-9 min-w-52 flex-1 items-center gap-2 rounded-md border border-line bg-pane px-2 text-sm">
+          <Search className="size-3.5 shrink-0 text-muted" />
+          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search the list" aria-label="Search recovered files and folders" className="h-full w-full bg-transparent outline-none" />
+        </label>
+        {query && <button type="button" className="h-9 rounded-md border border-line px-3 text-sm" onClick={() => setQuery("")}>Clear search</button>}
+        <p className="text-sm text-muted">{target.trim() ? "A name finds that deleted file or folder, and files that were inside it." : "Leave Look for blank to list every deleted file."}</p>
       </div>
       <div className="flex flex-wrap gap-3 border-b border-line px-3 py-2">
         {RECOVERY_KINDS.map((kind) => (
@@ -3498,13 +3528,15 @@ function RecoveryPage() {
               <th className="w-10 px-2 py-1">
                 <input
                   type="checkbox"
-                  aria-label="Select every result"
-                  checked={hits.length > 0 && selected.length === hits.length}
+                  aria-label="Select every result in the search"
+                  checked={shown.length > 0 && shown.every((hit) => picked[hit.id])}
                   onChange={(e) => {
                     const on = e.target.checked;
-                    const next: Record<number, boolean> = {};
-                    if (on) for (const hit of hits) next[hit.id] = true;
-                    setPicked(next);
+                    setPicked((current) => {
+                      const next = { ...current };
+                      for (const hit of shown) next[hit.id] = on;
+                      return next;
+                    });
                   }}
                 />
               </th>
@@ -3514,7 +3546,7 @@ function RecoveryPage() {
             </tr>
           </thead>
           <tbody>
-            {hits.map((hit) => (
+            {shown.map((hit) => (
               <tr key={hit.id} className="border-t border-line hover:bg-header">
                 <td className="px-2 py-1">
                   <input type="checkbox" aria-label={`Select ${hit.name}`} checked={!!picked[hit.id]} onChange={() => setPicked((current) => ({ ...current, [hit.id]: !current[hit.id] }))} />
@@ -3529,7 +3561,9 @@ function RecoveryPage() {
             ))}
           </tbody>
         </table>
-        {hits.length === 0 && <p className="px-3 py-6 text-sm text-muted">Nothing yet. Choose a drive and scan. Quick scan reads the Recycle Bin and deleted file records. Deep scan also searches free space, and it can take a long time.</p>}
+        {practice && <p className="px-3 py-2 text-sm text-muted">Example list. Search it here. The scan itself runs in the Windows program.</p>}
+        {shown.length === 0 && hits.length > 0 && <p className="px-3 py-6 text-sm text-muted">No file or folder in this list matches that search.</p>}
+        {hits.length === 0 && <p className="px-3 py-6 text-sm text-muted">Nothing yet. Choose a drive and scan. Type a deleted file or folder name in Look for to search for that one. Quick scan reads the Recycle Bin and deleted file records. Deep scan also searches free space, and it can take a long time.</p>}
       </div>
       <div className="flex flex-wrap items-center gap-2 border-t border-line px-3 py-2">
         <label className="flex min-w-0 flex-1 items-center gap-2 text-sm">

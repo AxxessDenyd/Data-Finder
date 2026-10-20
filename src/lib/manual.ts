@@ -10,7 +10,7 @@ export const aboutInfo = {
   created: "October 2026",
   author: "William Schneider",
   updated: "October 20, 2026",
-  version: "0.2.11",
+  version: "0.2.12",
   latest: "https://github.com/AxxessDenyd/Data-Finder/releases/latest",
   setup: "https://github.com/AxxessDenyd/Data-Finder/releases/latest/download/Data-Finder-Setup.exe",
   portable: "https://github.com/AxxessDenyd/Data-Finder/releases/latest/download/Data-Finder.exe",
@@ -128,6 +128,8 @@ export const manualSections: ManualSection[] = [
     title: "Recovery",
     items: [
       "The Recovery tab looks for files that were deleted. It does not change the drive you scan.",
+      "Look for takes the name of one deleted file or folder. Leave it blank to list everything the scan finds. A name also finds files that were inside that folder. Deep scan is not used for a named search, because files found in free space usually have no original name.",
+      "After the list appears, Search the list narrows it by file name, folder name, or original location. Clear search shows the full list again. Select every result selects only the rows that search is showing.",
       "Quick scan reads the Recycle Bin and deleted file records on an NTFS drive. Deep scan also searches free space for pictures, documents, music, video, and archives. Deep scan can take a long time. Stop ends it.",
       "Choose the kinds of files you want. The list shows the name, original location, size, kind, chance, and where it was found. Excellent and Good are the safer recoveries. Fair comes from free space. Poor means only part of the file may remain.",
       "Select the files, then choose a folder on a different drive. Choose folder opens a window so you can pick it. Data Finder will not save onto the drive it just scanned, because that can overwrite the data.",

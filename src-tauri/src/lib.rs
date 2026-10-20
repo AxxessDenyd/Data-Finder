@@ -714,8 +714,8 @@ async fn measure_path(path: String) -> Result<ExactSize, String> {
 }
 
 #[tauri::command]
-fn recovery_start(letter: String, kinds: Vec<String>, deep: bool) -> Result<(), String> {
-    recover::start(letter, kinds, deep)
+fn recovery_start(letter: String, kinds: Vec<String>, deep: bool, name: String) -> Result<(), String> {
+    recover::start(letter, kinds, deep, name)
 }
 
 #[tauri::command]

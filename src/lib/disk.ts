@@ -513,8 +513,8 @@ export interface RecoveryStatus {
   hits: RecoveryHit[];
 }
 
-export async function recoveryStart(letter: string, kinds: string[], deep: boolean): Promise<void> {
-  await invoke("recovery_start", { letter, kinds, deep });
+export async function recoveryStart(letter: string, kinds: string[], deep: boolean, name = ""): Promise<void> {
+  await invoke("recovery_start", { letter, kinds, deep, name });
 }
 
 export async function recoveryStatus(): Promise<RecoveryStatus> {
