@@ -10,7 +10,7 @@ export const aboutInfo = {
   created: "October 2026",
   author: "William Schneider",
   updated: "October 19, 2026",
-  version: "0.2.1",
+  version: "0.2.2",
   latest: "https://github.com/AxxessDenyd/Data-Finder/releases/latest",
   setup: "https://github.com/AxxessDenyd/Data-Finder/releases/latest/download/Data-Finder-Setup.exe",
   portable: "https://github.com/AxxessDenyd/Data-Finder/releases/latest/download/Data-Finder.exe",
@@ -41,7 +41,7 @@ export const manualSections: ManualSection[] = [
     title: "The window",
     items: [
       "The folder tree starts with Pinned and Recent. Desktop, Documents, Downloads, Pictures, Music, and Videos are pinned the first time the program runs. Pin on the right-click menu adds the folder you have open.",
-      "The search box at the top right filters the folder you have open. Refresh sits next to the path. Check boxes sit beside each name.",
+      "The search box sits on the same bar as Home, Find, and Help, at the right. It filters the folder you have open. Refresh sits next to the path. Check boxes sit beside each name.",
       "Home menus are New, Go, Drives, Filter, Tools, and Settings. A second bar has Cut, Copy, Paste, Rename, Delete, Sort, and View. The tabs are Home, Find, and Help.",
       "The menu button holds Second pane, Dark mode, Help, and About.",
       "New creates a folder or a file. The list includes a text document, markdown, spreadsheet, web page, JSON, settings, PowerShell, batch, log, and an empty file. If the name is already there, a number is added.",
@@ -56,7 +56,7 @@ export const manualSections: ManualSection[] = [
     title: "Home menus",
     items: [
       "New: folder and the file types Data Finder can create.",
-      "Go: Up, This computer, Refresh, Jump to path, and Places.",
+      "Go: Up, This computer, Refresh, and Jump to path.",
       "Drives: show every drive, mount a drive that is waiting for a letter, map a network drive, add a network location, and disconnect a network drive.",
       "Filter: sort order, file kind, and how recently an item changed.",
       "Tools: snapshots, one or two panes, disk use, the queue, and activity.",

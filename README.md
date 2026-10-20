@@ -21,7 +21,7 @@ Double-click a file to open it in the program Windows already uses for that file
 
 The newest installer and portable program are the Latest release on GitHub.
 
-The search box at the top right filters the open folder. Refresh sits next to the path. Check boxes sit beside each name. Pinned and Recent are at the top of the folder tree. Desktop, Documents, Downloads, Pictures, Music, and Videos start pinned.
+The search box sits on the Home, Find, and Help bar, at the right. Refresh sits next to the path. Check boxes sit beside each name. Pinned and Recent are at the top of the folder tree. Desktop, Documents, Downloads, Pictures, Music, and Videos start pinned.
 
 Drives you can see are mounted. Show every drive, in the Drives menu, lists the rest. That menu also mounts a drive that is waiting for a letter, maps a network drive, adds a network location, and disconnects a network drive.
 

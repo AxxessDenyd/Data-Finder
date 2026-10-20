@@ -434,8 +434,11 @@ function TabRow() {
           {label}
         </button>
       ))}
+      <div className="mb-1 ml-auto pr-2">
+        <HeaderSearch />
+      </div>
       {reading && (
-        <button type="button" className="mb-1 ml-auto shrink-0 px-2 text-xs text-tab-ink" onClick={() => useFiles.getState().setOptions({ reading: false })}>
+        <button type="button" className="mb-1 shrink-0 px-2 text-xs text-tab-ink" onClick={() => useFiles.getState().setOptions({ reading: false })}>
           Exit reading
         </button>
       )}
@@ -601,8 +604,6 @@ function HomeRibbon() {
   const dark = useFiles((s) => s.dark);
   const reading = useFiles((s) => s.reading);
   const calcDirs = useFiles((s) => s.calcDirs);
-  const [placesOpen, setPlacesOpen] = useState(false);
-  const [placesBox, setPlacesBox] = useState<DOMRect | null>(null);
   const [desktop, setDesktop] = useState(false);
   const store = useFiles.getState;
   useEffect(() => setDesktop(isDesktop()), []);
@@ -627,7 +628,6 @@ function HomeRibbon() {
         <MenuAction label={desktop ? "This computer" : "Open folder"} icon={<HardDrive className="size-4" />} onClick={() => void store().openFolder()} />
         <MenuAction label="Refresh" icon={<RefreshCw className="size-4" />} onClick={() => store().refresh()} />
         <MenuAction label="Jump to path" icon={<Search className="size-4" />} onClick={() => store().openDialog({ kind: "goto" })} />
-        <MenuAction label="Places" icon={<Folder className="size-4" />} onClick={(event) => { setPlacesBox(event.currentTarget.getBoundingClientRect()); setPlacesOpen(true); }} />
       </SectionMenu>
       <DriveMenu />
       <FilterMenu />
@@ -649,7 +649,6 @@ function HomeRibbon() {
         <MenuAction label="Unmount this drive" disabled={!drive || drive.mounted === false || drive.system} icon={<Unplug className="size-4" />} onClick={() => { if (drive && !drive.system) store().openDialog({ kind: "unmount", id: drive.id }); }} />
         <MenuAction label="Format this drive" disabled={!drive || drive.mounted === false || drive.system || !drive.name.endsWith(":")} icon={<Trash2 className="size-4" />} onClick={() => { if (drive && !drive.system && drive.name.endsWith(":")) store().openDialog({ kind: "format", id: drive.id }); }} />
       </SectionMenu>
-      {placesOpen && placesBox && <PlacesMenu anchor={placesBox} onClose={() => setPlacesOpen(false)} />}
     </div>
   );
 }
@@ -990,12 +989,9 @@ async function copyListing() {
 
 function NavPlaces({ pane }: { pane: 0 | 1 }) {
   const pins = useFiles((s) => s.pins);
-  const places = useFiles((s) => s.quickPlaces);
   const recent = useFiles((s) => s.recentPaths);
   const [recentOpen, setRecentOpen] = useState(false);
   const open = (path: string) => void useFiles.getState().openTypedPath(path);
-  const pinned = new Set(pins.map((path) => path.toLowerCase()));
-  const extra = places.filter((place) => !pinned.has(place.path.toLowerCase()));
   const row = (path: string, label: string) => (
     <button key={path} type="button" className="flex w-full items-center gap-1 px-2 py-1 text-left text-sm hover:bg-select" title={path} onClick={() => open(path)}>
       <Folder className="size-3.5 shrink-0 text-muted" />
@@ -1009,12 +1005,6 @@ function NavPlaces({ pane }: { pane: 0 | 1 }) {
         {pins.length === 0 && <p className="px-2 pb-1 text-xs text-muted">None yet</p>}
         {pins.map((path) => row(path, path.split(/[/\\]/).filter(Boolean).pop() || path))}
       </div>
-      {extra.length > 0 && (
-        <div className="border-b border-line py-1">
-          <p className="px-2 py-1 text-[11px] font-semibold text-muted">Places</p>
-          {extra.map((place) => row(place.path, place.name))}
-        </div>
-      )}
       <div className="border-b border-line py-1">
         <button type="button" className="flex w-full items-center gap-1 px-2 py-1 text-left text-[11px] font-semibold text-muted" onClick={() => setRecentOpen((open) => !open)}>
           {recentOpen ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
@@ -2941,9 +2931,6 @@ export function FileManager() {
   const helpPage = useFiles((s) => s.helpPage);
   return (
     <div className="flex h-dvh flex-col overflow-hidden bg-app text-ink">
-      <header className="flex h-10 shrink-0 items-center justify-end px-3">
-        <HeaderSearch />
-      </header>
       <TabRow />
       <Ribbon />
       <div className="relative flex min-h-0 flex-1">
