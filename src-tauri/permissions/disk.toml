@@ -33,4 +33,6 @@ commands.allow = [
   "earlier_list",
   "earlier_entries",
   "earlier_copy",
+  "restore_status",
+  "restore_setup",
 ]

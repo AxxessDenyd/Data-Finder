@@ -557,3 +557,16 @@ export async function earlierEntries(device: string, folder: string): Promise<Ea
 export async function earlierCopy(device: string, folder: string, names: string[], dest: string): Promise<string> {
   return invoke<string>("earlier_copy", { device, folder, names, dest });
 }
+
+export interface RestoreStatus {
+  drive: string;
+  enabled: "yes" | "no" | "unknown";
+}
+
+export async function restoreStatus(): Promise<RestoreStatus> {
+  return invoke<RestoreStatus>("restore_status");
+}
+
+export async function restoreSetup(drive: string): Promise<string> {
+  return invoke<string>("restore_setup", { drive });
+}

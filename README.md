@@ -21,7 +21,7 @@ Double-click a file to open it in the program Windows already uses for that file
 
 The newest installer and portable program are the Latest release on GitHub.
 
-The search box sits on the Home, Find, Recovery, Keeps, and Help bar, at the right. Refresh sits next to the path. Check boxes sit beside each name and can select more than one file or folder at a time. Pinned and Recent are at the top of the folder tree, and each can be folded. Pinned starts open. Folding it in one pane leaves the other pane as it was. The star on a folder pins or unpins it, and the X unpins a folder from the list. Desktop, Documents, Downloads, Pictures, Music, and Videos start pinned.
+The search control sits next to Help. It is a box that says Search, with a magnifying glass. Click it and the box opens so you can type. It filters the folder you have open. Click away with nothing typed, or press Escape, and it closes. Refresh sits next to the path. Check boxes sit beside each name and can select more than one file or folder at a time. Pinned and Recent are at the top of the folder tree, and each can be folded. Pinned starts open. Folding it in one pane leaves the other pane as it was. The star on a folder pins or unpins it, and the X unpins a folder from the list. Desktop, Documents, Downloads, Pictures, Music, and Videos start pinned.
 
 Refresh reads the open folder again and measures every folder size. On This computer, Refresh and clicking This computer update each drive's used space without opening the drive.
 
@@ -33,7 +33,7 @@ Info measures the selected file or folder and shows the exact size in bytes. Rec
 
 Drives you can see are mounted. Show every drive, in the Drives menu, lists the rest. That menu also mounts a drive that is waiting for a letter, maps a network drive, adds a network location, and disconnects a network drive.
 
-A snapshot asks where to save the copy. Leave the folder blank to keep it on this PC, or choose a folder on an external drive. Keeps, the tab between Recovery and Help, lists each saved copy. User folders can copy Desktop, Documents, Downloads, Pictures, Music, and Videos, and it asks where to save them because that can use a lot of space. Earlier copies is on the same Keeps tab. It reads restore points Windows already saved and copies files out of them. It is not a snapshot.
+A snapshot asks where to save the copy. Leave the folder blank to keep it on this PC, or choose a folder on an external drive. Keeps, the tab between Recovery and Help, lists each saved copy. User folders can copy Desktop, Documents, Downloads, Pictures, Music, and Videos, and it asks where to save them because that can use a lot of space. Earlier copies is on the same Keeps tab. It reads restore points Windows already saved and copies files out of them. It is not a snapshot. If restore points have never been turned on, Keeps can turn them on. Windows asks for permission, sets aside some disk space on the drive you pick, and saves the first restore point.
 
 About links open in the browser.
 

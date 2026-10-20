@@ -73,7 +73,7 @@ import {
   type ViewMode,
 } from "@/lib/file-store";
 import { childrenOf, driveCaption, formatDate, formatSize, pathIds, resolvePath, typeLabel, type FsNode } from "@/lib/vfs";
-import { chooseFolder, diskPath, earlierCopy, earlierEntries, earlierList, isDesktop, isDiskId, listSnapshots, mapNetwork, measurePath, mountVolume, openExternal, recoveryClear, recoverySave, recoveryStart, recoveryStatus, recoveryStop, removeSnapshot, restoreSnapshot, withoutDisk, type DiskSnapshot, type EarlierCopy, type EarlierEntry, type ExactSize, type RecoveryStatus } from "@/lib/disk";
+import { chooseFolder, diskPath, earlierCopy, earlierEntries, earlierList, isDesktop, isDiskId, listSnapshots, mapNetwork, measurePath, mountVolume, openExternal, recoveryClear, recoverySave, recoveryStart, recoveryStatus, recoveryStop, removeSnapshot, restoreSetup, restoreSnapshot, restoreStatus, withoutDisk, type DiskSnapshot, type EarlierCopy, type EarlierEntry, type ExactSize, type RecoveryStatus, type RestoreStatus } from "@/lib/disk";
 import { aboutInfo, manualSections } from "@/lib/manual";
 
 const UI_KEY = "data-finder-ui";
@@ -472,11 +472,9 @@ function TabRow() {
           {label}
         </button>
       ))}
-      <div className="mb-1 ml-auto pr-2">
-        <HeaderSearch />
-      </div>
+      <HeaderSearch />
       {reading && (
-        <button type="button" className="mb-1 shrink-0 px-2 text-xs text-tab-ink" onClick={() => useFiles.getState().setOptions({ reading: false })}>
+        <button type="button" className="mb-1 ml-auto shrink-0 px-2 text-xs text-tab-ink" onClick={() => useFiles.getState().setOptions({ reading: false })}>
           Exit reading
         </button>
       )}
@@ -2201,7 +2199,9 @@ function SnapshotWindow({ embedded = false }: { embedded?: boolean }) {
 }
 
 function EarlierDialog({ embedded = false }: { embedded?: boolean }) {
+  const nodes = useFiles((s) => s.nodes);
   const [rows, setRows] = useState<EarlierCopy[] | null>(null);
+  const [restore, setRestore] = useState<RestoreStatus | null>(null);
   const [error, setError] = useState("");
   const [picked, setPicked] = useState<EarlierCopy | null>(null);
   const [folder, setFolder] = useState("");
@@ -2210,12 +2210,42 @@ function EarlierDialog({ embedded = false }: { embedded?: boolean }) {
   const [dest, setDest] = useState("");
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
-  useEffect(() => {
-    void earlierList().then(setRows).catch((cause: unknown) => {
+  const [drive, setDrive] = useState("C");
+  const load = () => {
+    void earlierList().then((items) => {
+      setRows(items);
+      setError("");
+    }).catch((cause: unknown) => {
       setRows([]);
       setError(cause instanceof Error ? cause.message : "Could not read earlier copies");
     });
-  }, []);
+    if (!isDesktop()) return;
+    void restoreStatus().then(setRestore).catch(() => setRestore({ drive: "C", enabled: "unknown" }));
+  };
+  useEffect(load, []);
+  const letters = Array.from(new Set(
+    Object.values(nodes)
+      .filter((node) => node.kind === "drive" && node.name.endsWith(":") && node.mounted !== false)
+      .map((node) => node.name.replace(":", "").toUpperCase()),
+  ));
+  const choices = letters.length ? letters : ["C"];
+  const preferred = restore?.drive?.toUpperCase() ?? "";
+  const selectedDrive = choices.includes(drive) ? drive : (choices.includes(preferred) ? preferred : choices[0]);
+  const needsSetup = isDesktop() && !picked && rows !== null && rows.length === 0 && restore !== null && restore.enabled !== "yes";
+  const canCreate = isDesktop() && !picked && rows !== null && rows.length === 0 && !error && restore?.enabled === "yes";
+  const turnOn = () => {
+    setBusy(true);
+    setNote("Turning on restore points. Windows may ask for permission. This can take a few minutes.");
+    void restoreSetup(selectedDrive)
+      .then((message) => {
+        setNote(message);
+        setError("");
+        setRows(null);
+        load();
+      })
+      .catch((cause: unknown) => setNote(cause instanceof Error ? cause.message : "Could not turn on restore points"))
+      .finally(() => setBusy(false));
+  };
   const openCopy = (copy: EarlierCopy, path: string) => {
     setPicked(copy);
     setFolder(path);
@@ -2250,11 +2280,11 @@ function EarlierDialog({ embedded = false }: { embedded?: boolean }) {
         {!embedded && <button type="button" aria-label="Close" onClick={() => useFiles.getState().openDialog(null)}><X className="size-4" /></button>}
       </div>
       <p className="mt-1 text-sm text-muted">A snapshot copies a folder as it is right now. Earlier copies are restore points Windows already saved. Copy files out of one. The restore point is not changed.</p>
-      {error && <p className="mt-2 text-sm text-danger">{error}</p>}
-      {!picked && (
+      {error && !needsSetup && <p className="mt-2 text-sm text-danger">{error}</p>}
+      {!picked && !needsSetup && (
         <ul className="mt-3 max-h-72 overflow-auto border border-line">
           {rows === null && <li className="px-2 py-3 text-sm text-muted">Reading restore points…</li>}
-          {rows?.length === 0 && !error && <li className="px-2 py-3 text-sm text-muted">Windows has no earlier copies on this PC.</li>}
+          {rows?.length === 0 && !error && !needsSetup && <li className="px-2 py-3 text-sm text-muted">Windows has no earlier copies on this PC.</li>}
           {rows?.map((copy) => (
             <li key={copy.id}>
               <button type="button" className="block w-full px-2 py-2 text-left text-sm hover:bg-header" onClick={() => openCopy(copy, "")}>
@@ -2263,6 +2293,24 @@ function EarlierDialog({ embedded = false }: { embedded?: boolean }) {
             </li>
           ))}
         </ul>
+      )}
+      {needsSetup && (
+        <div className="mt-3 border border-line p-3">
+          <p className="text-sm">Restore points are not turned on, so Earlier copies has nothing to open yet.</p>
+          <label className="mt-3 block text-sm">
+            Drive
+            <select value={selectedDrive} onChange={(e) => setDrive(e.target.value)} aria-label="Drive for restore points" className="mt-1 h-9 w-full border border-line bg-pane px-2">
+              {choices.map((letter) => <option key={letter} value={letter}>{letter}:</option>)}
+            </select>
+          </label>
+          <button type="button" className="mt-3 min-h-11 bg-accent px-3 text-accent-ink disabled:opacity-40" disabled={busy} onClick={turnOn}>Turn on restore points</button>
+          <p className="mt-2 text-sm text-muted">Windows asks for permission, sets aside some disk space, and saves the first restore point. Later ones show up here, and Earlier copies can open them.</p>
+        </div>
+      )}
+      {canCreate && (
+        <div className="mt-3">
+          <button type="button" className="min-h-11 border border-line px-3 disabled:opacity-40" disabled={busy} onClick={turnOn}>Create a restore point</button>
+        </div>
       )}
       {picked && (
         <>
@@ -3163,12 +3211,34 @@ function RecoveryPage() {
 function HeaderSearch() {
   const active = useFiles((s) => s.active);
   const query = useFiles((s) => s.panes[s.active].query);
+  const [open, setOpen] = useState(false);
+  const box = useRef<HTMLInputElement>(null);
+  const expanded = open || query.length > 0;
+  useEffect(() => {
+    if (open) box.current?.focus();
+  }, [open]);
+  if (!expanded) {
+    return (
+      <button type="button" className="mb-1 ml-1 flex h-8 items-center gap-1.5 rounded-md border border-line bg-pane px-2.5 text-sm" onClick={() => setOpen(true)}>
+        <Search className="size-3.5" />
+        Search
+      </button>
+    );
+  }
   return (
-    <label className="flex h-8 w-56 items-center gap-1 rounded-md border border-line bg-pane px-2">
-      <Search className="size-3.5 text-muted" />
+    <label className="mb-1 ml-1 flex h-8 w-56 items-center gap-1 rounded-md border border-line bg-pane px-2">
+      <Search className="size-3.5 shrink-0 text-muted" />
       <input
+        ref={box}
         value={query}
         onChange={(e) => useFiles.getState().setQuery(active, e.target.value)}
+        onBlur={() => { if (!useFiles.getState().panes[useFiles.getState().active].query.trim()) setOpen(false); }}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") {
+            useFiles.getState().setQuery(active, "");
+            setOpen(false);
+          }
+        }}
         placeholder="Search"
         aria-label="Search this folder"
         className="h-full w-full bg-transparent text-sm outline-none"

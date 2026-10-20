@@ -1413,6 +1413,224 @@ async fn earlier_copy(device: String, folder: String, names: Vec<String>, dest: 
     .map_err(|err| err.to_string())?
 }
 
+#[derive(Serialize)]
+struct RestoreStatus {
+    drive: String,
+    enabled: String,
+}
+
+fn system_drive_letter() -> char {
+    std::env::var("SystemDrive")
+        .ok()
+        .and_then(|value| value.chars().find(|ch| ch.is_ascii_alphabetic()))
+        .map(|ch| ch.to_ascii_uppercase())
+        .unwrap_or('C')
+}
+
+fn one_drive_letter(raw: &str) -> Result<char, String> {
+    let trimmed = raw.trim().trim_end_matches(['\\', '/']);
+    let letter = trimmed
+        .chars()
+        .next()
+        .filter(|ch| ch.is_ascii_alphabetic())
+        .ok_or_else(|| "Choose a drive letter".to_string())?;
+    let rest = trimmed.chars().nth(1);
+    let ok = trimmed.chars().count() == 1 || (trimmed.chars().count() == 2 && rest == Some(':'));
+    if !ok {
+        return Err("Choose a drive letter".into());
+    }
+    Ok(letter.to_ascii_uppercase())
+}
+
+#[tauri::command]
+fn restore_status() -> Result<RestoreStatus, String> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        let script = r#"$ErrorActionPreference = 'SilentlyContinue'
+$drive = $env:SystemDrive
+if (-not $drive) { $drive = 'C:' }
+$drive = $drive.TrimEnd('\')
+$global = 'unknown'
+try {
+  $props = Get-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\SystemRestore' -ErrorAction Stop
+  if ($null -ne $props.DisableSR) {
+    if ([int]$props.DisableSR -eq 0) { $global = 'yes' } else { $global = 'no' }
+  }
+} catch {}
+$storage = & vssadmin.exe list shadowstorage /for=$drive 2>&1 | Out-String
+if ($storage -match 'Shadow Copy Storage volume') { $enabled = 'yes' }
+elseif ($storage -match 'No items found') { $enabled = 'no' }
+elseif ($global -eq 'no') { $enabled = 'no' }
+elseif ($global -eq 'yes') { $enabled = 'yes' }
+else { $enabled = 'unknown' }
+Write-Output ('drive=' + $drive.TrimEnd(':'))
+Write-Output ('enabled=' + $enabled)
+"#;
+        let output = Command::new("powershell")
+            .args(["-NoProfile", "-NonInteractive", "-Command", script])
+            .creation_flags(0x08000000)
+            .output()
+            .map_err(|err| err.to_string())?;
+        let text = String::from_utf8_lossy(&output.stdout);
+        let mut drive = system_drive_letter().to_string();
+        let mut enabled = "unknown".to_string();
+        for line in text.lines() {
+            if let Some(rest) = line.trim().strip_prefix("drive=") {
+                if let Ok(letter) = one_drive_letter(rest) {
+                    drive = letter.to_string();
+                }
+            } else if let Some(rest) = line.trim().strip_prefix("enabled=") {
+                if matches!(rest, "yes" | "no" | "unknown") {
+                    enabled = rest.to_string();
+                }
+            }
+        }
+        Ok(RestoreStatus { drive, enabled })
+    }
+    #[cfg(not(windows))]
+    {
+        Err("Restore points work in the Windows program".into())
+    }
+}
+
+#[tauri::command]
+async fn restore_setup(drive: String) -> Result<String, String> {
+    let letter = one_drive_letter(&drive)?;
+    tauri::async_runtime::spawn_blocking(move || setup_restore_points(letter))
+        .await
+        .map_err(|err| err.to_string())?
+}
+
+fn setup_restore_points(letter: char) -> Result<String, String> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|dur| dur.as_millis())
+            .unwrap_or(0);
+        let dir = std::env::temp_dir();
+        let script_path = dir.join(format!("df-restore-{stamp}.ps1"));
+        let result_path = dir.join(format!("df-restore-{stamp}.txt"));
+        let script_text = script_path.to_string_lossy().to_string();
+        let result_text = result_path.to_string_lossy().to_string();
+        if script_text.contains(['\'', '"', '\n', '\r']) || result_text.contains(['\'', '"', '\n', '\r']) {
+            return Err("Could not turn on restore points".into());
+        }
+        let body = format!(
+            r#"$ErrorActionPreference = 'Stop'
+$drive = '{letter}:\'
+$for = '{letter}:'
+$result = '{result}'
+function Save([string]$text) {{ Set-Content -LiteralPath $result -Value $text -Encoding ascii }}
+try {{
+  Enable-ComputerRestore -Drive $drive
+}} catch {{
+  Save ('error:' + $_.Exception.Message)
+  exit 1
+}}
+$ready = $false
+foreach ($size in @('10GB','5%')) {{
+  & vssadmin.exe Resize ShadowStorage /For=$for /On=$for /MaxSize=$size 2>&1 | Out-Null
+  if ($LASTEXITCODE -eq 0) {{ $ready = $true; break }}
+  & vssadmin.exe Add ShadowStorage /For=$for /On=$for /MaxSize=$size 2>&1 | Out-Null
+  if ($LASTEXITCODE -eq 0) {{ $ready = $true; break }}
+}}
+$point = 'later'
+try {{
+  Checkpoint-Computer -Description 'Data Finder' -RestorePointType MODIFY_SETTINGS
+  $point = 'now'
+}} catch {{
+  $text = "$_"
+  if ($text -match '1440|already been created|within the past') {{ $point = 'recent' }} else {{ $point = 'later' }}
+}}
+Save $point
+exit 0
+"#,
+            letter = letter,
+            result = result_text
+        );
+        fs::write(&script_path, body).map_err(|err| err.to_string())?;
+        let outer = r#"$ErrorActionPreference = 'Stop'
+$script = $env:DF_SCRIPT
+if (-not $script) { Write-Output 'error:Could not turn on restore points'; exit 1 }
+try {
+  $text = Get-Content -LiteralPath $script -Raw
+  $encoded = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($text))
+  $admin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+  $arg = @('-NoProfile','-ExecutionPolicy','Bypass','-EncodedCommand', $encoded)
+  if ($admin) {
+    $proc = Start-Process -FilePath powershell.exe -Wait -PassThru -WindowStyle Hidden -ArgumentList $arg
+  } else {
+    $proc = Start-Process -FilePath powershell.exe -Verb RunAs -Wait -PassThru -WindowStyle Hidden -ArgumentList $arg
+  }
+  if (-not $proc) { Write-Output 'cancelled'; exit 5 }
+  exit $proc.ExitCode
+} catch {
+  $text = "$_"
+  if ($text -match 'cancel') { Write-Output 'cancelled'; exit 5 }
+  Write-Output ('error:' + $_.Exception.Message)
+  exit 1
+}
+"#;
+        let output = Command::new("powershell")
+            .args(["-NoProfile", "-NonInteractive", "-Command", outer])
+            .env("DF_SCRIPT", &script_text)
+            .creation_flags(0x08000000)
+            .output()
+            .map_err(|err| err.to_string())?;
+        let saved = fs::read_to_string(&result_path).unwrap_or_default();
+        let _ = fs::remove_file(&script_path);
+        let _ = fs::remove_file(&result_path);
+        let saved = saved.trim();
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if stdout.to_lowercase().contains("cancelled") {
+            return Err("Windows permission was not given, so restore points stayed off.".into());
+        }
+        if let Some(message) = saved.strip_prefix("error:") {
+            return Err(short_restore_error(message));
+        }
+        if stdout.trim().to_lowercase().starts_with("error:") {
+            return Err(short_restore_error(stdout.trim().trim_start_matches("error:").trim_start_matches("Error:")));
+        }
+        let named = format!("{letter}:");
+        let message = match saved {
+            "now" => format!("Restore points are on for {named}. Windows saved one just now and will keep saving them. Earlier copies can open them."),
+            "recent" => format!("Restore points are on for {named}. Windows already saved one today, so it did not make another. Earlier copies can open the ones it has."),
+            "later" => format!("Restore points are on for {named}. Windows will save restore points from now on. Earlier copies will list the next one."),
+            _ => String::new(),
+        };
+        if !message.is_empty() {
+            return Ok(message);
+        }
+        if !output.status.success() {
+            let detail = if stderr.trim().is_empty() { stdout.trim() } else { stderr.trim() };
+            return Err(short_restore_error(detail));
+        }
+        Err("Could not turn on restore points".into())
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = letter;
+        Err("Restore points work in the Windows program".into())
+    }
+}
+
+fn short_restore_error(message: &str) -> String {
+    let line = message.lines().find(|line| !line.trim().is_empty()).unwrap_or("Could not turn on restore points").trim();
+    let line = line.strip_prefix("error:").unwrap_or(line).trim();
+    if line.is_empty() {
+        return "Could not turn on restore points".into();
+    }
+    let short: String = line.chars().take(180).collect();
+    if short.is_empty() {
+        return "Could not turn on restore points".into();
+    }
+    short
+}
+
 #[tauri::command]
 fn choose_folder() -> Result<String, String> {
     #[cfg(windows)]
@@ -1473,7 +1691,9 @@ pub fn run() {
             choose_folder,
             earlier_list,
             earlier_entries,
-            earlier_copy
+            earlier_copy,
+            restore_status,
+            restore_setup
         ])
         .run(tauri::generate_context!())
         .expect("Data Finder failed to start");

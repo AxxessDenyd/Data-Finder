@@ -10,7 +10,7 @@ export const aboutInfo = {
   created: "October 2026",
   author: "William Schneider",
   updated: "October 20, 2026",
-  version: "0.2.6",
+  version: "0.2.7",
   latest: "https://github.com/AxxessDenyd/Data-Finder/releases/latest",
   setup: "https://github.com/AxxessDenyd/Data-Finder/releases/latest/download/Data-Finder-Setup.exe",
   portable: "https://github.com/AxxessDenyd/Data-Finder/releases/latest/download/Data-Finder.exe",
@@ -41,7 +41,7 @@ export const manualSections: ManualSection[] = [
     title: "The window",
     items: [
       "The folder tree starts with Pinned and Recent. Both can be folded. Pinned starts open and stays that way until you fold it. Folding Pinned in one pane does not fold it in the other. Desktop, Documents, Downloads, Pictures, Music, and Videos are pinned the first time the program runs. The star on a folder pins or unpins it. The X next to a pinned folder unpins it. Any folder can be pinned.",
-      "The search box sits on the same bar as Home, Find, Recovery, Keeps, and Help, at the right. It filters the folder you have open. Refresh sits next to the path. Check boxes sit beside each name.",
+      "The search control sits next to Help. It is a box that says Search, with a magnifying glass. Click it and the box opens so you can type. It filters the folder you have open. Click away with nothing typed, or press Escape, and it closes. Refresh sits next to the path. Check boxes sit beside each name.",
       "Home is one bar: New, Go, Drives, Filter, Tools, and Settings, then Cut, Copy, Paste, Rename, Delete, Sort, and View, then Two panes. The tabs are Home, Find, Recovery, Keeps, and Help.",
       "Refresh reads the folder again and measures every folder size. On This computer it updates each drive's used space without opening the drive.",
       "The menu button holds Dark mode, Help, and About. Two panes is on the Home bar, to the right of View.",
@@ -112,7 +112,7 @@ export const manualSections: ManualSection[] = [
       "Find narrows the current folder by name, size, type, or date. Pattern selects names such as *.sys or files over 100 MB and leaves the rest of the folder on screen.",
       "Deep search looks through a folder or the whole computer. Jump to path opens a typed path.",
       "Snapshots copies the real files. Data Finder asks where to save them first. Leave the folder blank to keep the copy on this PC, or choose an external drive. Keeps, the tab between Recovery and Help, lists each saved copy, what it captured, and how much space it uses. User folders copies Desktop, Documents, Downloads, Pictures, Music, and Videos, and it asks where to save them because that can use a lot of space.",
-      "Earlier copies is on the same Keeps tab. A saved copy is the folder as it is right now. Earlier copies lists restore points Windows already saved and lets you copy files out of one. The restore point is not changed. Run Data Finder as administrator if Windows will not show them.",
+      "Earlier copies is on the same Keeps tab. A saved copy is the folder as it is right now. Earlier copies lists restore points Windows already saved and lets you copy files out of one. The restore point is not changed. If restore points have never been turned on, choose a drive and click Turn on restore points. Windows asks for permission, sets aside some disk space, and saves the first restore point. After that, Earlier copies can open them. Run Data Finder as administrator if Windows will not show them.",
     ],
   },
   {
