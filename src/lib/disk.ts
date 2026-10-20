@@ -475,3 +475,52 @@ export async function measureChildren(id: string): Promise<Record<string, Measur
   }
   return sizes;
 }
+
+export interface ExactSize {
+  bytes: number;
+  files: number;
+  folders: number;
+  exact: boolean;
+  blocked: boolean;
+}
+
+export async function measurePath(path: string): Promise<ExactSize> {
+  return invoke<ExactSize>("measure_path", { path });
+}
+
+export interface RecoveryHit {
+  id: number;
+  name: string;
+  original: string;
+  bytes: number;
+  kind: string;
+  chance: string;
+  source: string;
+}
+
+export interface RecoveryStatus {
+  running: boolean;
+  done: boolean;
+  phase: string;
+  scanned_mb: number;
+  total_mb: number;
+  error: string;
+  letter: string;
+  hits: RecoveryHit[];
+}
+
+export async function recoveryStart(letter: string, kinds: string[], deep: boolean): Promise<void> {
+  await invoke("recovery_start", { letter, kinds, deep });
+}
+
+export async function recoveryStatus(): Promise<RecoveryStatus> {
+  return invoke<RecoveryStatus>("recovery_status");
+}
+
+export async function recoveryStop(): Promise<void> {
+  await invoke("recovery_stop");
+}
+
+export async function recoverySave(ids: number[], folder: string): Promise<{ saved: number; failed: number; folder: string; message: string }> {
+  return invoke("recovery_save", { ids, folder });
+}

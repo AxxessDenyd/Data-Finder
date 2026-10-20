@@ -4,6 +4,8 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+mod recover;
+
 #[derive(Serialize)]
 struct DiskEntry {
     name: String,
@@ -632,6 +634,105 @@ async fn measure_children(path: String) -> Result<Vec<Measured>, String> {
     .map_err(|err| err.to_string())?
 }
 
+#[derive(Serialize)]
+struct ExactSize {
+    bytes: u64,
+    files: u64,
+    folders: u64,
+    exact: bool,
+    blocked: bool,
+}
+
+fn measure_tree(root: &Path) -> ExactSize {
+    let mut bytes = 0u64;
+    let mut files = 0u64;
+    let mut folders = 0u64;
+    let mut exact = true;
+    let mut stack = vec![root.to_path_buf()];
+    let mut saw_root = false;
+    while let Some(path) = stack.pop() {
+        let meta = match fs::symlink_metadata(&path) {
+            Ok(meta) => meta,
+            Err(_) => {
+                if !saw_root {
+                    return ExactSize { bytes: 0, files: 0, folders: 0, exact: false, blocked: true };
+                }
+                exact = false;
+                continue;
+            }
+        };
+        let followed = if meta.file_type().is_symlink() {
+            match fs::metadata(&path) {
+                Ok(item) => item,
+                Err(_) => {
+                    exact = false;
+                    saw_root = true;
+                    continue;
+                }
+            }
+        } else {
+            meta
+        };
+        if followed.is_dir() {
+            if saw_root {
+                folders += 1;
+            }
+            saw_root = true;
+            match fs::read_dir(&path) {
+                Ok(entries) => {
+                    for entry in entries.flatten() {
+                        stack.push(entry.path());
+                    }
+                }
+                Err(_) => {
+                    if folders == 0 && files == 0 && path == root {
+                        return ExactSize { bytes: 0, files: 0, folders: 0, exact: false, blocked: true };
+                    }
+                    exact = false;
+                }
+            }
+        } else {
+            saw_root = true;
+            files += 1;
+            bytes = bytes.saturating_add(followed.len());
+        }
+    }
+    ExactSize { bytes, files, folders, exact, blocked: false }
+}
+
+#[tauri::command]
+async fn measure_path(path: String) -> Result<ExactSize, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let path = PathBuf::from(&path);
+        if !path.exists() {
+            return Err("That item was not found".into());
+        }
+        Ok(measure_tree(&path))
+    })
+    .await
+    .map_err(|err| err.to_string())?
+}
+
+#[tauri::command]
+fn recovery_start(letter: String, kinds: Vec<String>, deep: bool) -> Result<(), String> {
+    recover::start(letter, kinds, deep)
+}
+
+#[tauri::command]
+fn recovery_status() -> recover::RecoveryStatus {
+    recover::status()
+}
+
+#[tauri::command]
+fn recovery_stop() {
+    recover::stop()
+}
+
+#[tauri::command]
+fn recovery_save(ids: Vec<u64>, folder: String) -> Result<recover::RecoverResult, String> {
+    recover::save(ids, folder)
+}
+
 #[tauri::command]
 fn create_item(parent: String, name: String, file: bool) -> Result<(), String> {
     safe_name(&name)?;
@@ -1108,6 +1209,11 @@ pub fn run() {
             copy_item,
             move_item,
             measure_children,
+            measure_path,
+            recovery_start,
+            recovery_status,
+            recovery_stop,
+            recovery_save,
             unmount_drive,
             mount_image,
             format_drive,

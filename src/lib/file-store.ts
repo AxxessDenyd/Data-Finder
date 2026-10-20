@@ -72,7 +72,7 @@ export function columnsFrom(saved: Partial<ColumnWidths> | undefined, current: C
 }
 
 export type SortKey = "name" | "size" | "type" | "date";
-export type RibbonTab = "home" | "inspect" | "tools" | "options" | "resources";
+export type RibbonTab = "home" | "inspect" | "tools" | "options" | "resources" | "recovery";
 export type BarMode = "linear" | "log";
 export type FindColumn = "name" | "size" | "type" | "date";
 export type DateFormat = "mdy" | "ymd" | "dmy";
@@ -146,6 +146,7 @@ export interface Filters {
   showHidden: boolean;
   showReadonly: boolean;
   showSystem: boolean;
+  showBlocked: boolean;
   kind: "all" | "dir" | "file";
   ext: string;
   attr: "any" | "h" | "r" | "s";
@@ -158,13 +159,14 @@ export interface Filters {
 }
 
 export function flagVisible(
-  node: { hidden?: boolean; readonly?: boolean; system?: boolean; kind?: string },
-  flags: { showHidden?: boolean; showReadonly?: boolean; showSystem?: boolean },
+  node: { hidden?: boolean; readonly?: boolean; system?: boolean; kind?: string; blocked?: boolean },
+  flags: { showHidden?: boolean; showReadonly?: boolean; showSystem?: boolean; showBlocked?: boolean },
 ) {
   if (node.kind === "drive" || node.kind === "computer") return true;
   if (node.hidden && flags.showHidden === false) return false;
   if (node.readonly && flags.showReadonly === false) return false;
   if (node.system && flags.showSystem === false) return false;
+  if (node.blocked && flags.showBlocked === false) return false;
   return true;
 }
 
@@ -276,6 +278,7 @@ const defaultFilters: Filters = {
   showHidden: false,
   showReadonly: true,
   showSystem: true,
+  showBlocked: true,
   kind: "all",
   ext: "",
   attr: "any",
@@ -2524,7 +2527,7 @@ function normalizeFilters(raw: Partial<Filters> & { visibility?: Visibility }): 
       showSystem = true;
     }
   }
-  return { ...defaultFilters, ...raw, showHidden, showReadonly, showSystem, maxAgeDays: raw.maxAgeDays ?? 0, attr: "any" };
+  return { ...defaultFilters, ...raw, showHidden, showReadonly, showSystem, showBlocked: raw.showBlocked ?? true, maxAgeDays: raw.maxAgeDays ?? 0, attr: "any" };
 }
 
 function passes(

@@ -13,15 +13,19 @@ The same guide is inside the program. Open the Help tab, then Manual. Search the
 
 ## The window
 
-The program opens in one pane. The folder tree is on the left and the file list is on the right. Home, Find, Analyze, View, and Help are the tabs.
+The program opens in one pane. The folder tree is on the left and the file list is on the right. The tabs are Home, Find, Recovery, and Help.
 
-Home is New, Go, Drives, Filter, Tools, and Settings, plus a bar for Cut, Copy, Paste, Rename, Delete, Sort, and View. The tabs are Home, Find, and Help. The menu button holds Second pane, Dark mode, Help, and About.
+Home is New, Go, Drives, Filter, Tools, and Settings, plus a bar for Cut, Copy, Paste, Rename, Delete, Sort, and View. The tabs are Home, Find, Recovery, and Help. The menu button holds Second pane, Dark mode, Help, and About.
 
 Double-click a file to open it in the program Windows already uses for that file. Folder sizes are the full measured size. Recent, in the folder tree, folds open and closed.
 
 The newest installer and portable program are the Latest release on GitHub.
 
-The search box sits on the Home, Find, and Help bar, at the right. Refresh sits next to the path. Check boxes sit beside each name. Pinned and Recent are at the top of the folder tree. Desktop, Documents, Downloads, Pictures, Music, and Videos start pinned.
+The search box sits on the Home, Find, Recovery, and Help bar, at the right. Refresh sits next to the path. Check boxes sit beside each name. Pinned and Recent are at the top of the folder tree. Desktop, Documents, Downloads, Pictures, Music, and Videos start pinned.
+
+View, then Show, includes Hidden items, Read-only items, System items, and No access folders. No access folders starts checked. Uncheck it to hide folders Windows will not open, in the file list and in the folder tree. The Show menu stays open while the pointer moves onto it.
+
+Info measures the selected file or folder and shows the exact size in bytes. Recovery scans a drive for deleted files and saves the ones you pick onto a different drive. Deep scan also searches free space. Run Data Finder as administrator if a scan cannot read the drive.
 
 Drives you can see are mounted. Show every drive, in the Drives menu, lists the rest. That menu also mounts a drive that is waiting for a letter, maps a network drive, adds a network location, and disconnects a network drive.
 

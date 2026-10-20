@@ -73,7 +73,7 @@ import {
   type ViewMode,
 } from "@/lib/file-store";
 import { childrenOf, driveCaption, formatDate, formatSize, pathIds, resolvePath, typeLabel, type FsNode } from "@/lib/vfs";
-import { diskPath, isDesktop, isDiskId, listSnapshots, mapNetwork, mountVolume, openExternal, removeSnapshot, restoreSnapshot, withoutDisk, type DiskSnapshot } from "@/lib/disk";
+import { diskPath, isDesktop, isDiskId, listSnapshots, mapNetwork, measurePath, mountVolume, openExternal, recoverySave, recoveryStart, recoveryStatus, recoveryStop, removeSnapshot, restoreSnapshot, withoutDisk, type DiskSnapshot, type ExactSize, type RecoveryStatus } from "@/lib/disk";
 import { aboutInfo, manualSections } from "@/lib/manual";
 
 const UI_KEY = "data-finder-ui";
@@ -292,25 +292,42 @@ function ViewMenu() {
   const showHidden = useFiles((s) => s.filters.showHidden);
   const showReadonly = useFiles((s) => s.filters.showReadonly);
   const showSystem = useFiles((s) => s.filters.showSystem);
+  const showBlocked = useFiles((s) => s.filters.showBlocked);
   const [open, setOpen] = useState(false);
   const [show, setShow] = useState(false);
   const [box, setBox] = useState<{ left: number; top: number } | null>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const showRef = useRef<HTMLDivElement>(null);
+  const showMenuRef = useRef<HTMLDivElement>(null);
+  const showTimer = useRef<number | null>(null);
   const [showBox, setShowBox] = useState<{ left: number; top: number } | null>(null);
   const set = useFiles.getState().setOptions;
   const filters = useFiles.getState().setFilters;
-  const row = (on: boolean, label: string, fn: () => void, icon?: ReactNode, nest?: boolean) => (
+  const keepShow = () => {
+    if (showTimer.current != null) window.clearTimeout(showTimer.current);
+  };
+  const queueHideShow = () => {
+    keepShow();
+    showTimer.current = window.setTimeout(() => setShow(false), 400);
+  };
+  const placeShow = () => {
+    const rect = showRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const width = 248;
+    const left = window.innerWidth - rect.right >= width ? rect.right - 12 : Math.max(8, rect.left - width + 12);
+    setShowBox({ left, top: Math.max(8, Math.min(rect.top, window.innerHeight - 320)) });
+    setShow(true);
+    keepShow();
+  };
+  const row = (on: boolean, label: string, fn: () => void, icon?: ReactNode) => (
     <button
       type="button"
       className="flex min-h-9 w-full items-center gap-2 rounded-md px-2 text-left text-sm hover:bg-select"
-      onMouseEnter={() => { if (!nest) setShow(false); }}
       onClick={fn}
     >
       <span className="grid w-4 shrink-0 place-items-center">{on ? <Check className="size-4" /> : null}</span>
       <span className="grid w-5 shrink-0 place-items-center text-muted">{icon}</span>
       <span className="min-w-0 flex-1">{label}</span>
-      {nest ? <ChevronRight className="size-3.5 text-muted" /> : null}
     </button>
   );
   const layouts: Array<[ViewMode, string, ReactNode]> = [
@@ -350,7 +367,7 @@ function ViewMenu() {
           <button type="button" aria-label="Close view menu" className="fixed inset-0 z-40 cursor-default" onClick={() => { setOpen(false); setShow(false); }} />
           <div className="fixed z-50 max-h-[70vh] w-64 overflow-auto rounded-lg border border-line bg-menu p-1 shadow-xl" style={{ left: box.left, top: box.top }}>
             {layouts.map(([id, label, icon]) => (
-              <span key={id}>{row(viewMode === id, label, () => { set({ viewMode: id }); setOpen(false); }, icon)}</span>
+              <span key={id}>{row(viewMode === id, label, () => { set({ viewMode: id }); setOpen(false); setShow(false); }, icon)}</span>
             ))}
             <div className="my-1 h-px bg-line" />
             {row(detailsOpen, "Details pane", () => set({ detailsOpen: !detailsOpen }), <PanelLeft className="size-4" />)}
@@ -358,27 +375,47 @@ function ViewMenu() {
             <div className="my-1 h-px bg-line" />
             <div
               ref={showRef}
-              className="relative"
-              onMouseEnter={() => {
-                const rect = showRef.current?.getBoundingClientRect();
-                if (rect) setShowBox({ left: Math.min(rect.right + 4, window.innerWidth - 248), top: rect.top });
-                setShow(true);
+              onMouseEnter={placeShow}
+              onMouseLeave={(event) => {
+                const next = event.relatedTarget;
+                if (next instanceof Node && showMenuRef.current?.contains(next)) return;
+                queueHideShow();
               }}
             >
-              {row(false, "Show", () => setShow((v) => !v), <List className="size-4" />, true)}
-              {show && showBox && (
-                <div className="fixed z-50 w-60 rounded-lg border border-line bg-menu p-1 shadow-xl" style={{ left: showBox.left, top: showBox.top }}>
-                  {row(showNav, "Navigation pane", () => set({ showNav: !showNav }), <PanelLeft className="size-4" />)}
-                  {row(compact, "Compact view", () => set({ compact: !compact }), <List className="size-4" />)}
-                  {row(itemChecks, "Item check boxes", () => set({ itemChecks: !itemChecks }), <Check className="size-4" />)}
-                  {row(showExt, "File name extensions", () => set({ showExt: !showExt }), <FileText className="size-4" />)}
-                  {row(showHidden, "Hidden items", () => filters({ showHidden: !showHidden }), <EyeOffIcon />)}
-                  {row(showReadonly, "Read-only items", () => filters({ showReadonly: !showReadonly }), <File className="size-4" />)}
-                  {row(showSystem, "System items", () => filters({ showSystem: !showSystem }), <HardDrive className="size-4" />)}
-                </div>
-              )}
+              <button
+                type="button"
+                className="flex min-h-9 w-full items-center gap-2 rounded-md px-2 text-left text-sm hover:bg-select"
+                onClick={() => { if (show) setShow(false); else placeShow(); }}
+              >
+                <span className="grid w-4 shrink-0 place-items-center" />
+                <span className="grid w-5 shrink-0 place-items-center text-muted"><List className="size-4" /></span>
+                <span className="min-w-0 flex-1">Show</span>
+                <ChevronRight className="size-3.5 text-muted" />
+              </button>
             </div>
           </div>
+          {show && showBox && (
+            <div
+              ref={showMenuRef}
+              className="fixed z-[60] w-60 rounded-lg border border-line bg-menu p-1 shadow-xl"
+              style={{ left: showBox.left, top: showBox.top }}
+              onMouseEnter={keepShow}
+              onMouseLeave={(event) => {
+                const next = event.relatedTarget;
+                if (next instanceof Node && showRef.current?.contains(next)) return;
+                queueHideShow();
+              }}
+            >
+              {row(showNav, "Navigation pane", () => set({ showNav: !showNav }), <PanelLeft className="size-4" />)}
+              {row(compact, "Compact view", () => set({ compact: !compact }), <List className="size-4" />)}
+              {row(itemChecks, "Item check boxes", () => set({ itemChecks: !itemChecks }), <Check className="size-4" />)}
+              {row(showExt, "File name extensions", () => set({ showExt: !showExt }), <FileText className="size-4" />)}
+              {row(showHidden, "Hidden items", () => filters({ showHidden: !showHidden }), <EyeOffIcon />)}
+              {row(showReadonly, "Read-only items", () => filters({ showReadonly: !showReadonly }), <File className="size-4" />)}
+              {row(showSystem, "System items", () => filters({ showSystem: !showSystem }), <HardDrive className="size-4" />)}
+              {row(showBlocked, "No access folders", () => filters({ showBlocked: !showBlocked }), <Folder className="size-4" />)}
+            </div>
+          )}
         </>
       )}
     </div>
@@ -403,6 +440,7 @@ function TabRow() {
   const tabs: Array<[RibbonTab, string]> = [
     ["home", "Home"],
     ["inspect", "Find"],
+    ["recovery", "Recovery"],
     ["resources", "Help"],
   ];
   const go = (id: RibbonTab) => useFiles.getState().setTab(id);
@@ -453,6 +491,7 @@ function Ribbon() {
       {tab === "home" && <HomeRibbon />}
       {tab === "home" && <ActionRibbon />}
       {tab === "inspect" && <InspectRibbon />}
+      {tab === "recovery" && <RecoveryRibbon />}
       {tab === "tools" && <ToolsRibbon />}
       {tab === "options" && <OptionsRibbon />}
       {tab === "resources" && <ResourcesRibbon />}
@@ -582,6 +621,7 @@ function FilterMenu() {
       {narrow("Programs", filters.group === "programs", { kind: "file", group: "programs" })}
       {narrow("Archives", filters.group === "archives", { kind: "file", group: "archives" })}
       {narrow("100 MB and up", filters.minBytes > 0, { kind: "file", minBytes: 100 * MB })}
+      <MenuAction label={`${filters.showBlocked ? "✓ " : ""}No access folders`} onClick={() => set({ showBlocked: !filters.showBlocked })} />
       <div className="my-1 h-px bg-line" />
       <p className="px-2 py-1 text-xs text-muted">Changed</p>
       <MenuAction label={`${filters.maxAgeDays === 0 ? "✓ " : ""}Any time`} onClick={() => set({ maxAgeDays: 0 })} />
@@ -2427,18 +2467,57 @@ function Props({ id }: { id: string }) {
   const node = useFiles((s) => s.nodes[id]);
   const nodes = useFiles((s) => s.nodes);
   const order = useFiles((s) => s.order);
+  const [exact, setExact] = useState<ExactSize | null>(null);
+  const [measuring, setMeasuring] = useState(false);
+  useEffect(() => {
+    const path = diskPath(id);
+    if (!path || !isDesktop()) return;
+    let live = true;
+    setMeasuring(true);
+    setExact(null);
+    void measurePath(path).then((result) => {
+      if (!live) return;
+      setExact(result);
+      useFiles.setState((state) => {
+        const current = state.nodes[id];
+        if (!current) return {};
+        return {
+          nodes: {
+            ...state.nodes,
+            [id]: {
+              ...current,
+              bytes: result.blocked && result.bytes === 0 ? null : result.bytes,
+              approx: !result.exact,
+              blocked: result.blocked && result.bytes === 0,
+            },
+          },
+        };
+      });
+    }).catch(() => {
+      if (live) setExact(null);
+    }).finally(() => {
+      if (live) setMeasuring(false);
+    });
+    return () => { live = false; };
+  }, [id]);
   if (!node) return null;
   const snap = { nodes, order };
   const kids = node.kind === "file" ? 0 : childrenOf(snap, id).length;
+  const sizeText = exact
+    ? exact.blocked && exact.bytes === 0
+      ? "No access"
+      : `${exact.bytes.toLocaleString()} bytes (${formatSize(exact.bytes) || "0 B"})`
+    : shownSize(node.bytes, node.approx, node.blocked) || "Not measured";
   const rows: Array<[string, string]> = [
     ["Name", node.kind === "drive" ? driveCaption(node) : node.name],
     ["Type", typeLabel(node)],
     ["Location", displayPath(snap, id)],
-    ["Size", shownSize(node.bytes, node.approx) || "Not measured"],
+    ["Size", measuring ? "Measuring the exact size…" : sizeText],
+    ["Exact", exact ? (exact.exact ? "Yes" : exact.blocked ? "No — this item could not be read" : "No — some items inside could not be read") : measuring ? "Measuring" : "Not measured yet"],
+    ["Contains", exact && node.kind !== "file" ? `${exact.files.toLocaleString()} files, ${exact.folders.toLocaleString()} folders` : node.kind === "file" ? "—" : `${kids} direct items`],
     ["Mounted", node.kind === "drive" ? (node.mounted === false ? "Not mounted" : "Mounted") : "—"],
-    ["Contains", node.kind === "file" ? "—" : `${kids} direct items`],
     ["Modified", formatDate(node.modified)],
-    ["Flags", [node.hidden && "Hidden", node.readonly && "Read-only", node.system && "System"].filter(Boolean).join(", ") || "Normal"],
+    ["Flags", [node.hidden && "Hidden", node.readonly && "Read-only", node.system && "System", node.blocked && "No access"].filter(Boolean).join(", ") || "Normal"],
   ];
   return (
     <div>
@@ -2742,6 +2821,143 @@ function NotePane({ id }: { id: string }) {
   );
 }
 
+function RecoveryRibbon() {
+  return (
+    <div className="flex items-center px-3 py-2 text-sm text-muted">
+      Recovery copies deleted files into a folder you choose. The drive you scan is not changed.
+    </div>
+  );
+}
+
+const RECOVERY_KINDS = ["Pictures", "Documents", "Music", "Video", "Archives", "Email", "Other"];
+
+function RecoveryPage() {
+  const nodes = useFiles((s) => s.nodes);
+  const drives = Object.values(nodes).filter((node) => node.kind === "drive" && node.name.endsWith(":") && node.mounted !== false);
+  const [letter, setLetter] = useState(drives.some((drive) => drive.name.startsWith("C")) ? "C" : (drives[0]?.name.replace(":", "") || "C"));
+  const [kinds, setKinds] = useState<string[]>(RECOVERY_KINDS);
+  const [deep, setDeep] = useState(false);
+  const [status, setStatus] = useState<RecoveryStatus | null>(null);
+  const [picked, setPicked] = useState<Record<number, boolean>>({});
+  const [dest, setDest] = useState("");
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    if (!isDesktop()) return;
+    let live = true;
+    const pull = () => {
+      void recoveryStatus().then((next) => { if (live) setStatus(next); }).catch(() => undefined);
+    };
+    pull();
+    const timer = window.setInterval(pull, 700);
+    return () => { live = false; window.clearInterval(timer); };
+  }, []);
+  const hits = status?.hits ?? [];
+  const selected = hits.filter((hit) => picked[hit.id]);
+  const toggleKind = (kind: string) => setKinds((current) => current.includes(kind) ? current.filter((item) => item !== kind) : [...current, kind]);
+  const start = () => {
+    setNote("");
+    setPicked({});
+    void recoveryStart(letter, kinds, deep).catch((error: unknown) => setNote(error instanceof Error ? error.message : "Could not start the scan"));
+  };
+  const save = () => {
+    if (!dest.trim()) {
+      setNote("Type a folder on a different drive, such as D:\\Recovered");
+      return;
+    }
+    setBusy(true);
+    void recoverySave(selected.map((hit) => hit.id), dest.trim()).then((result) => setNote(result.message)).catch((error: unknown) => setNote(error instanceof Error ? error.message : "Could not save those files")).finally(() => setBusy(false));
+  };
+  if (!isDesktop()) {
+    return <div className="flex flex-1 items-center justify-center p-6 text-sm text-muted">Recovery runs in the Windows program, not in the browser copy.</div>;
+  }
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex flex-wrap items-end gap-3 border-b border-line px-3 py-3">
+        <label className="text-sm">
+          <span className="mb-1 block text-muted">Drive</span>
+          <select value={letter} onChange={(e) => setLetter(e.target.value)} className="h-9 min-w-24 rounded-md border border-line bg-pane px-2" aria-label="Drive to scan">
+            {(drives.length ? drives : [{ name: "C:" }]).map((drive) => {
+              const value = drive.name.replace(":", "");
+              return <option key={value} value={value}>{drive.name}</option>;
+            })}
+          </select>
+        </label>
+        <label className="flex h-9 items-center gap-2 text-sm">
+          <input type="checkbox" checked={deep} onChange={(e) => setDeep(e.target.checked)} />
+          Deep scan
+        </label>
+        <button type="button" className="h-9 rounded-md bg-accent px-3 text-sm text-accent-ink" disabled={status?.running} onClick={start}>Scan</button>
+        <button type="button" className="h-9 rounded-md border border-line px-3 text-sm" disabled={!status?.running} onClick={() => void recoveryStop()}>Stop</button>
+        <p className="min-w-0 flex-1 text-sm text-muted">
+          {status?.phase || "Ready"}
+          {status?.total_mb ? ` · ${status.scanned_mb} MB of ${status.total_mb} MB` : status?.scanned_mb ? ` · ${status.scanned_mb} MB` : ""}
+          {hits.length ? ` · ${hits.length} found` : ""}
+        </p>
+      </div>
+      <div className="flex flex-wrap gap-3 border-b border-line px-3 py-2">
+        {RECOVERY_KINDS.map((kind) => (
+          <label key={kind} className="flex items-center gap-1.5 text-sm">
+            <input type="checkbox" checked={kinds.includes(kind)} onChange={() => toggleKind(kind)} />
+            {kind}
+          </label>
+        ))}
+      </div>
+      {status?.error && <p className="border-b border-line px-3 py-2 text-sm text-danger">{status.error}</p>}
+      <div className="min-h-0 flex-1 overflow-auto">
+        <table className="w-full min-w-[760px] border-collapse text-left text-sm">
+          <thead className="sticky top-0 bg-header text-xs text-muted">
+            <tr>
+              <th className="w-10 px-2 py-1">
+                <input
+                  type="checkbox"
+                  aria-label="Select every result"
+                  checked={hits.length > 0 && selected.length === hits.length}
+                  onChange={(e) => {
+                    const on = e.target.checked;
+                    const next: Record<number, boolean> = {};
+                    if (on) for (const hit of hits) next[hit.id] = true;
+                    setPicked(next);
+                  }}
+                />
+              </th>
+              {["Name", "Original location", "Size", "Kind", "Chance", "Found in"].map((label) => (
+                <th key={label} className="px-2 py-1 font-medium">{label}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {hits.map((hit) => (
+              <tr key={hit.id} className="border-t border-line hover:bg-header">
+                <td className="px-2 py-1">
+                  <input type="checkbox" aria-label={`Select ${hit.name}`} checked={!!picked[hit.id]} onChange={() => setPicked((current) => ({ ...current, [hit.id]: !current[hit.id] }))} />
+                </td>
+                <td className="max-w-56 truncate px-2 py-1" title={hit.name}>{hit.name}</td>
+                <td className="max-w-80 truncate px-2 py-1" title={hit.original}>{hit.original}</td>
+                <td className="whitespace-nowrap px-2 py-1 tabular-nums">{formatSize(hit.bytes) || "0 B"}</td>
+                <td className="px-2 py-1">{hit.kind}</td>
+                <td className="px-2 py-1">{hit.chance}</td>
+                <td className="px-2 py-1">{hit.source}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {hits.length === 0 && <p className="px-3 py-6 text-sm text-muted">Nothing yet. Choose a drive and scan. Quick scan reads the Recycle Bin and deleted file records. Deep scan also searches free space, and it can take a long time.</p>}
+      </div>
+      <div className="flex flex-wrap items-center gap-2 border-t border-line px-3 py-2">
+        <label className="flex min-w-0 flex-1 items-center gap-2 text-sm">
+          <span className="shrink-0 text-muted">Save to</span>
+          <input value={dest} onChange={(e) => setDest(e.target.value)} placeholder="D:\Recovered" aria-label="Folder to save recovered files" className="h-9 w-full rounded-md border border-line bg-pane px-2" />
+        </label>
+        <button type="button" className="h-9 rounded-md bg-accent px-3 text-sm text-accent-ink disabled:opacity-40" disabled={busy || selected.length === 0} onClick={save}>
+          Save {selected.length || ""} selected
+        </button>
+        {note && <span className="text-sm">{note}</span>}
+      </div>
+    </div>
+  );
+}
+
 function HeaderSearch() {
   const active = useFiles((s) => s.active);
   const query = useFiles((s) => s.panes[s.active].query);
@@ -2937,6 +3153,8 @@ export function FileManager() {
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         {tab === "resources" ? (
           helpPage === "about" ? <AboutPage /> : <ManualPage />
+        ) : tab === "recovery" ? (
+          <RecoveryPage />
         ) : split ? (
           <Group orientation="vertical" className="min-h-0 flex-1">
             <Panel minSize="20%" id="pane-a" className="min-h-0">
