@@ -339,36 +339,77 @@ function remember(recent: string[], id: string) {
 const seed = createSeed();
 const sizedSeed = { ...seed, nodes: fillFolderSizes(seed.nodes, seed.order) };
 
+function mergeDrives(current: { nodes: Record<string, FsNode>; order: Record<string, string[]>; panes: [PaneModel, PaneModel]; pins: string[]; recentPaths: string[] }, fresh: FsNode[]) {
+  let nodes = { ...current.nodes };
+  let order = { ...current.order };
+  const oldIds = (order.pc ?? []).filter((item) => isDiskId(item) && nodes[item]?.kind === "drive");
+  const used = new Set<string>();
+  const kept: string[] = [];
+  for (const oldId of oldIds) {
+    const old = nodes[oldId];
+    const match = fresh.find((node) => !used.has(node.id) && node.name.toLowerCase() === old.name.toLowerCase());
+    if (!match) {
+      const cleaned = dropLoaded(nodes, order, oldId);
+      nodes = cleaned.nodes;
+      order = cleaned.order;
+      delete nodes[oldId];
+      forgetDisk(oldId);
+      continue;
+    }
+    used.add(match.id);
+    const nextPath = diskPath(match.id);
+    if (nextPath) setDiskPath(oldId, nextPath);
+    forgetDisk(match.id);
+    nodes[oldId] = {
+      ...old,
+      name: match.name,
+      mounted: match.mounted,
+      capacity: match.capacity,
+      free: match.free,
+      note: match.note,
+      label: match.label,
+      system: match.system,
+    };
+    kept.push(oldId);
+  }
+  for (const node of fresh) {
+    if (used.has(node.id)) continue;
+    nodes[node.id] = node;
+    kept.push(node.id);
+  }
+  order = { ...order, pc: kept };
+  const letters = new Set(fresh.filter((node) => node.name.endsWith(":")).map((node) => node.name.toLowerCase()));
+  const onDisk = (path: string) => {
+    const match = /^([a-zA-Z]:)/.exec(path);
+    if (!match) return true;
+    return letters.has(match[1].toLowerCase());
+  };
+  const panes = current.panes.map((pane) => {
+    const pathId = nodes[pane.pathId] ? pane.pathId : "pc";
+    return {
+      ...pane,
+      pathId,
+      selected: pane.selected.filter((item) => nodes[item]),
+      anchor: pane.anchor && nodes[pane.anchor] ? pane.anchor : null,
+    };
+  }) as [PaneModel, PaneModel];
+  return {
+    nodes,
+    order,
+    panes,
+    pins: current.pins.filter(onDisk),
+    recentPaths: current.recentPaths.filter(onDisk),
+  };
+}
+
 async function refreshDriveStats(announce: boolean) {
   if (!isDesktop()) return;
   try {
     const fresh = await fetchDrives();
+    if (fresh.length === 0) return;
     useFiles.setState((current) => {
-      const nodes = { ...current.nodes };
-      const used = new Set<string>();
-      for (const id of current.order.pc ?? []) {
-        const node = nodes[id];
-        if (!node || node.kind !== "drive") continue;
-        const match = fresh.find((item) => !used.has(item.id) && item.name.toLowerCase() === node.name.toLowerCase());
-        if (!match) continue;
-        used.add(match.id);
-        const nextPath = diskPath(match.id);
-        if (nextPath) setDiskPath(id, nextPath);
-        forgetDisk(match.id);
-        nodes[id] = {
-          ...node,
-          mounted: match.mounted,
-          capacity: match.capacity,
-          free: match.free,
-          note: match.note,
-          label: match.label,
-          system: match.system,
-        };
-      }
-      for (const item of fresh) {
-        if (!used.has(item.id)) forgetDisk(item.id);
-      }
-      return announce ? { nodes, status: "Drive sizes updated" } : { nodes };
+      const merged = mergeDrives(current, fresh);
+      return announce ? { ...merged, status: "Drives updated" } : merged;
     });
   } catch (error) {
     if (announce) useFiles.setState({ status: error instanceof Error ? error.message : "Could not refresh drive sizes" });
@@ -773,56 +814,8 @@ async function reloadDiskFolder(id: string) {
 
 async function applyFreshDrives(message: string) {
   const fresh = await fetchDrives();
-  useFiles.setState((current) => {
-    let nodes = { ...current.nodes };
-    let order = { ...current.order };
-    const oldIds = (order.pc ?? []).filter((item) => isDiskId(item) && nodes[item]?.kind === "drive");
-    const used = new Set<string>();
-    const kept: string[] = [];
-    for (const oldId of oldIds) {
-      const old = nodes[oldId];
-      const match = fresh.find((node) => !used.has(node.id) && node.name.toLowerCase() === old.name.toLowerCase());
-      if (!match) {
-        const cleaned = dropLoaded(nodes, order, oldId);
-        nodes = cleaned.nodes;
-        order = cleaned.order;
-        delete nodes[oldId];
-        forgetDisk(oldId);
-        continue;
-      }
-      used.add(match.id);
-      const nextPath = diskPath(match.id);
-      if (nextPath) setDiskPath(oldId, nextPath);
-      forgetDisk(match.id);
-      nodes[oldId] = {
-        ...old,
-        name: match.name,
-        mounted: match.mounted,
-        capacity: match.capacity,
-        free: match.free,
-        note: match.note,
-        label: match.label,
-        system: match.system,
-      };
-      kept.push(oldId);
-    }
-    for (const node of fresh) {
-      if (used.has(node.id)) continue;
-      nodes[node.id] = node;
-      kept.push(node.id);
-    }
-    order = { ...order, pc: kept };
-    const panes = current.panes.map((pane) => {
-      const pathId = nodes[pane.pathId] ? pane.pathId : "pc";
-      return {
-        ...pane,
-        pathId,
-        selected: pane.selected.filter((item) => nodes[item]),
-        anchor: pane.anchor && nodes[pane.anchor] ? pane.anchor : null,
-      };
-    }) as [PaneModel, PaneModel];
-    return { nodes, order, panes, dialog: null, clipboard: null, status: message };
-  });
+  if (fresh.length === 0) throw new Error("Windows did not report a drive");
+  useFiles.setState((current) => ({ ...mergeDrives(current, fresh), status: message }));
 }
 
 export const useFiles = create<FileState & Actions>((set, get) => ({

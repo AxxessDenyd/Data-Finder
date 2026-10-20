@@ -10,7 +10,7 @@ export const aboutInfo = {
   created: "October 2026",
   author: "William Schneider",
   updated: "October 20, 2026",
-  version: "0.2.12",
+  version: "0.2.13",
   latest: "https://github.com/AxxessDenyd/Data-Finder/releases/latest",
   setup: "https://github.com/AxxessDenyd/Data-Finder/releases/latest/download/Data-Finder-Setup.exe",
   portable: "https://github.com/AxxessDenyd/Data-Finder/releases/latest/download/Data-Finder.exe",
@@ -43,7 +43,7 @@ export const manualSections: ManualSection[] = [
       "The folder tree starts with Pinned and Recent. Both can be folded. Pinned starts open and stays that way until you fold it. Folding Pinned in one pane does not fold it in the other. Desktop, Documents, Downloads, Pictures, Music, and Videos are pinned the first time the program runs. The star on a folder pins or unpins it. The X next to a pinned folder unpins it. Any folder can be pinned.",
       "The search control sits on the Home bar, to the right of Two panes. It is a box that says Search, with a magnifying glass. Click it and the box opens so you can type. It filters the folder you have open. Click away with nothing typed, or press Escape, and it closes. Refresh sits next to the path. Check boxes sit beside each name.",
       "Home is one bar: New, Go, Drives, Filter, Tools, and Settings, then Cut, Copy, Paste, Rename, Delete, Sort, and View, then Two panes, then Search at the right. The tabs are Home, Find, Keeps, Recovery, Decryption, and Help.",
-      "Refresh reads the folder again and measures every folder size. On This computer it updates each drive's used space without opening the drive.",
+      "Refresh reads the folder again and measures every folder size. On This computer it adds a drive that was just plugged in and removes one that was unplugged.",
       "The menu button holds Dark mode, Help, and About. Two panes is on the Home bar, to the right of View.",
       "New creates a folder or a file. The list includes a text document, markdown, spreadsheet, web page, JSON, settings, PowerShell, batch, log, and an empty file. If the name is already there, a number is added.",
       "Filter sorts by name, size, date, or type. Click the same sort again to reverse it. It can also show folders, files, documents, pictures, music, videos, programs, archives, or items of 100 MB and up, and limit them to today, the past week, or the past month.",
@@ -89,7 +89,7 @@ export const manualSections: ManualSection[] = [
   {
     title: "Drives",
     items: [
-      "This computer lists each drive as a letter and a name, such as C:\\ [Local Disk]. A drive you can see is mounted. Drives that are not mounted stay off the list unless Show every drive is checked.",
+      "This computer lists each drive as a letter and a name, such as C:\\ [Local Disk]. A flash drive is added when Windows gives it a letter, and it is removed when you unplug it. You do not have to restart Data Finder. Drives that are not mounted stay off the list unless Show every drive is checked.",
       "Drives that can be given a letter appear in the Drives menu. Mount assigns the next free letter. An empty optical drive is not listed there, because there is nothing to mount.",
       "Map network drive connects \\\\server\\share to a letter. Add network location connects the share without a letter. Disconnect closes a network drive. The Windows drive cannot be unmounted or formatted.",
     ],
@@ -140,7 +140,7 @@ export const manualSections: ManualSection[] = [
   {
     title: "Decryption",
     items: [
-      "Decryption is the tab between Recovery and Help. It works with BitLocker on the drives Windows can see. While it reads those drives, the page and the status bar say it is checking for BitLocker.",
+      "Decryption is the tab between Recovery and Help. It reads BitLocker with Windows' own tool, one drive at a time. A Key ID is the eight characters from that tool. If a read fails, the drives already listed stay on screen. Refresh tries again. A read that takes too long is stopped so the next one can start.",
       "A locked drive shows its Key ID, eight characters. That is the same ID as on the blue BitLocker screen. Copy it and match it to the recovery key. The key for a different ID will not open the drive. Unlock still needs the recovery key, password, or key file. Data Finder does not guess or break a missing key.",
       "Where to find the key lists Personal, School, Work, Active Directory, Intune, and No key at all. A recovery key is 48 digits. The blue BitLocker screen shows a Key ID of eight characters, and the key has to match that ID.",
       "Personal keys are on the Microsoft account that was used on that PC, or on a printed page, a USB stick, or a saved text file. School and work keys are held by that organization's help desk. Active Directory stores a key on the computer object when Group Policy saved it. Intune stores a key when the disk encryption policy saves it to Entra ID. An admin reads it. A student or employee usually cannot.",

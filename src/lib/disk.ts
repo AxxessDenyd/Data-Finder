@@ -121,6 +121,10 @@ export async function formatVolume(path: string, filesystem: string, label: stri
   return invoke<string>("format_drive", { path, filesystem, label });
 }
 
+export async function driveMask(): Promise<number> {
+  return invoke<number>("drive_mask");
+}
+
 export async function fetchDrives(): Promise<FsNode[]> {
   const drives = await invoke<RawEntry[]>("drives");
   return drives.map((entry) => {

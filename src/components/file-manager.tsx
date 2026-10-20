@@ -73,7 +73,7 @@ import {
   type ViewMode,
 } from "@/lib/file-store";
 import { childrenOf, driveCaption, formatDate, formatSize, pathIds, resolvePath, typeLabel, type FsNode } from "@/lib/vfs";
-import { bitlockerOff, bitlockerOn, bitlockerReadKey, bitlockerSaveKey, bitlockerStatus, bitlockerUnlock, chooseFolder, chooseKeyFile, diskPath, earlierCopy, earlierEntries, earlierList, isDesktop, isDiskId, listSnapshots, mapNetwork, measurePath, mountVolume, openExternal, recoveryClear, recoverySave, recoveryStart, recoveryStatus, recoveryStop, removeSnapshot, restoreSetup, restoreSnapshot, restoreStatus, withoutDisk, type BitLockerDrive, type DiskSnapshot, type EarlierCopy, type EarlierEntry, type ExactSize, type RecoveryHit, type RecoveryStatus, type RestoreStatus } from "@/lib/disk";
+import { bitlockerOff, bitlockerOn, bitlockerReadKey, bitlockerSaveKey, bitlockerStatus, bitlockerUnlock, chooseFolder, chooseKeyFile, diskPath, driveMask, earlierCopy, earlierEntries, earlierList, isDesktop, isDiskId, listSnapshots, mapNetwork, measurePath, mountVolume, openExternal, recoveryClear, recoverySave, recoveryStart, recoveryStatus, recoveryStop, removeSnapshot, restoreSetup, restoreSnapshot, restoreStatus, withoutDisk, type BitLockerDrive, type DiskSnapshot, type EarlierCopy, type EarlierEntry, type ExactSize, type RecoveryHit, type RecoveryStatus, type RestoreStatus } from "@/lib/disk";
 import { aboutInfo, manualSections } from "@/lib/manual";
 
 const UI_KEY = "data-finder-ui";
@@ -3250,11 +3250,15 @@ function DecryptionPage() {
   const [keyDrive, setKeyDrive] = useState("");
   const [asked, setAsked] = useState(false);
   const [checking, setChecking] = useState(() => (isDesktop() ? "Checking drives for BitLocker…" : ""));
+  const loadGen = useRef(0);
   const load = (elevate: boolean) => {
+    const ticket = loadGen.current + 1;
+    loadGen.current = ticket;
     const text = elevate ? "Checking drives for BitLocker. Windows may ask for permission." : "Checking drives for BitLocker…";
     setChecking(text);
     if (useFiles.getState().tab === "decrypt") useFiles.setState({ status: text });
     void bitlockerStatus(elevate).then((items) => {
+      if (ticket !== loadGen.current) return;
       setRows(items);
       setError("");
       setLetter((current) => current && items.some((item) => item.letter === current) ? current : items[0]?.letter ?? "");
@@ -3262,11 +3266,14 @@ function DecryptionPage() {
         useFiles.setState({ status: items.length === 0 ? "No BitLocker drive was found" : `BitLocker checked · ${items.length} drive${items.length === 1 ? "" : "s"}` });
       }
     }).catch((cause: unknown) => {
-      setRows([]);
+      if (ticket !== loadGen.current) return;
       const message = cause instanceof Error ? cause.message : "Could not read BitLocker";
       setError(message);
+      setRows((current) => current ?? []);
       if (useFiles.getState().tab === "decrypt") useFiles.setState({ status: message });
-    }).finally(() => setChecking(""));
+    }).finally(() => {
+      if (ticket === loadGen.current) setChecking("");
+    });
   };
   useEffect(() => {
     if (isDesktop()) {
@@ -3625,6 +3632,40 @@ export function FileManager() {
   useEffect(() => {
     document.documentElement.classList.toggle("dark", dark);
   }, [dark]);
+  useEffect(() => {
+    if (!isDesktop()) return;
+    let last = -1;
+    let live = true;
+    const later: number[] = [];
+    const clearLater = () => {
+      while (later.length) window.clearTimeout(later.pop());
+    };
+    const look = async () => {
+      try {
+        const mask = await driveMask();
+        if (!live) return;
+        if (last >= 0 && mask !== last) {
+          clearLater();
+          await useFiles.getState().reloadDrives();
+          for (const wait of [1500, 4000]) {
+            later.push(window.setTimeout(() => {
+              if (live) void useFiles.getState().reloadDrives();
+            }, wait));
+          }
+        }
+        last = mask;
+      } catch {
+        /* try again on the next check */
+      }
+    };
+    void look();
+    const timer = window.setInterval(() => void look(), 2000);
+    return () => {
+      live = false;
+      window.clearInterval(timer);
+      clearLater();
+    };
+  }, []);
   useEffect(() => {
     try {
       const raw = localStorage.getItem(UI_KEY);

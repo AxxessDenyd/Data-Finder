@@ -77,6 +77,18 @@ fn push_entry(out: &mut Vec<DiskEntry>, name: String, path: PathBuf, meta: &fs::
 }
 
 #[tauri::command]
+fn drive_mask() -> u32 {
+    #[cfg(windows)]
+    {
+        unsafe { winvol::GetLogicalDrives() }
+    }
+    #[cfg(not(windows))]
+    {
+        0
+    }
+}
+
+#[tauri::command]
 fn drives() -> Vec<DiskEntry> {
     #[cfg(windows)]
     {
@@ -1676,6 +1688,10 @@ fn recovery_digits(raw: &str) -> Result<String, String> {
 }
 
 fn capture_ps(body: &str, elevate: bool) -> Result<String, String> {
+    capture_ps_wait(body, elevate, 0)
+}
+
+fn capture_ps_wait(body: &str, elevate: bool, timeout_secs: u64) -> Result<String, String> {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -1716,13 +1732,35 @@ try {
   exit 1
 }
 "#;
-        let output = Command::new("powershell")
+        let mut command = Command::new("powershell");
+        command
             .args(["-NoProfile", "-NonInteractive", "-Command", outer])
             .env("DF_SCRIPT", &script_text)
             .env("DF_ELEVATE", if elevate { "yes" } else { "no" })
             .creation_flags(0x08000000)
-            .output()
-            .map_err(|err| err.to_string())?;
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+        let mut child = command.spawn().map_err(|err| err.to_string())?;
+        let pid = child.id();
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(child.wait_with_output());
+        });
+        let waited = if timeout_secs == 0 {
+            rx.recv().map_err(|_| "Windows did not finish that BitLocker step".to_string())?
+        } else {
+            match rx.recv_timeout(std::time::Duration::from_secs(timeout_secs)) {
+                Ok(result) => result,
+                Err(_) => {
+                    let _ = Command::new("taskkill")
+                        .args(["/PID", &pid.to_string(), "/T", "/F"])
+                        .creation_flags(0x08000000)
+                        .output();
+                    return Err("BitLocker took too long and was stopped. Refresh to try again.".into());
+                }
+            }
+        };
+        let output = waited.map_err(|err| err.to_string())?;
         let saved = fs::read_to_string(&result_path).unwrap_or_default();
         let _ = fs::remove_file(&script_path);
         let _ = fs::remove_file(&result_path);
@@ -1801,26 +1839,63 @@ fn parse_bitlocker_line(line: &str) -> Option<BitLockerDrive> {
 
 #[tauri::command]
 fn bitlocker_status(elevate: bool) -> Result<Vec<BitLockerDrive>, String> {
-    let body = r#"$lines = New-Object System.Collections.Generic.List[string]
-foreach ($vol in @(Get-BitLockerVolume)) {
-  $kinds = @($vol.KeyProtector | ForEach-Object { [string]$_.KeyProtectorType }) -join ','
+    let body = r#"$ErrorActionPreference = 'Continue'
+function Take([string]$text, [string]$name) {
+  $pattern = '(?m)^\s*' + [regex]::Escape($name) + ':\s*(.+)$'
+  $match = [regex]::Match($text, $pattern)
+  if ($match.Success) { return $match.Groups[1].Value.Trim() }
+  return ''
+}
+function ShortState([string]$value) {
+  $lower = $value.ToLower()
+  if ($lower -match 'fully encrypted') { return 'FullyEncrypted' }
+  if ($lower -match 'fully decrypted') { return 'FullyDecrypted' }
+  if ($lower -match 'encryption in progress') { return 'EncryptionInProgress' }
+  if ($lower -match 'decryption in progress') { return 'DecryptionInProgress' }
+  if ($lower -match 'paused') { return 'Paused' }
+  $clean = ($value -replace '[^A-Za-z]', '')
+  if (-not $clean) { return 'Unknown' }
+  return $clean
+}
+$lines = New-Object System.Collections.Generic.List[string]
+$letters = @(Get-PSDrive -PSProvider FileSystem -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^[A-Za-z]$' } | ForEach-Object { $_.Name.ToUpper() })
+foreach ($letter in $letters) {
+  $raw = ''
+  try { $raw = (& manage-bde.exe -status ($letter + ':') 2>&1 | Out-String) } catch { $raw = '' }
+  if ($raw -notmatch 'Lock Status:' -and $raw -notmatch 'Conversion Status:') { continue }
+  $lockText = Take $raw 'Lock Status'
+  $lock = 'Unlocked'
+  if ($lockText -match 'Locked') { $lock = 'Locked' }
+  $protText = Take $raw 'Protection Status'
+  $prot = 'Off'
+  if ($protText -match 'On') { $prot = 'On' }
+  $state = ShortState (Take $raw 'Conversion Status')
+  $pct = 0
+  $pctText = Take $raw 'Percentage Encrypted'
+  if ($pctText -match '(\d+)') { $pct = [int]$Matches[1] }
+  $volume = 'Data'
+  if ($raw -match '\[OS Volume\]') { $volume = 'OperatingSystem' }
   $idList = New-Object System.Collections.Generic.List[string]
-  foreach ($prot in @($vol.KeyProtector)) {
-    $kind = [string]$prot.KeyProtectorType
-    if ($kind -ne 'RecoveryPassword' -and $kind -ne 'NumericalPassword') { continue }
-    $hex = (([string]$prot.KeyProtectorId) -replace '[{}\-]', '').ToUpper()
+  $idRaw = ''
+  try { $idRaw = (& manage-bde.exe -protectors -get ($letter + ':') -type RecoveryPassword 2>&1 | Out-String) } catch { $idRaw = '' }
+  foreach ($found in [regex]::Matches($idRaw, '\{([0-9A-Fa-f\-]+)\}')) {
+    $hex = ($found.Groups[1].Value -replace '-', '').ToUpper()
     if ($hex.Length -ge 8) {
       $short = $hex.Substring(0, 8)
       if (-not $idList.Contains($short)) { [void]$idList.Add($short) }
     }
   }
   $ids = $idList -join ','
-  $mount = [string]$vol.MountPoint
-  $lines.Add(($mount + '|' + [string]$vol.LockStatus + '|' + [string]$vol.ProtectionStatus + '|' + [string]$vol.VolumeStatus + '|' + [string]$vol.EncryptionPercentage + '|' + [string]$vol.VolumeType + '|' + $kinds + '|' + $ids))
+  $lines.Add(($letter + ':|' + $lock + '|' + $prot + '|' + $state + '|' + $pct + '|' + $volume + '||' + $ids))
 }
-if ($lines.Count -eq 0) { Save 'none' } else { Save ($lines -join [char]10) }
+if ($lines.Count -eq 0) {
+  if (-not (Get-Command manage-bde.exe -ErrorAction SilentlyContinue)) { Save 'error:Windows could not read BitLocker on this PC.' }
+  else { Save 'none' }
+} else {
+  Save ($lines -join [char]10)
+}
 "#;
-    let text = capture_ps(body, elevate)?;
+    let text = capture_ps_wait(body, elevate, 25)?;
     if text == "none" {
         return Ok(Vec::new());
     }
@@ -2062,6 +2137,7 @@ pub fn run() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             drives,
+            drive_mask,
             list_dir,
             create_item,
             rename_path,

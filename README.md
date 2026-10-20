@@ -23,7 +23,7 @@ The newest installer and portable program are the Latest release on GitHub.
 
 The search control sits on the Home bar, to the right of Two panes. It is a box that says Search, with a magnifying glass. Click it and the box opens so you can type. It filters the folder you have open. Click away with nothing typed, or press Escape, and it closes. Refresh sits next to the path. Check boxes sit beside each name and can select more than one file or folder at a time. Pinned and Recent are at the top of the folder tree, and each can be folded. Pinned starts open. Folding it in one pane leaves the other pane as it was. The star on a folder pins or unpins it, and the X unpins a folder from the list. Desktop, Documents, Downloads, Pictures, Music, and Videos start pinned.
 
-Refresh reads the open folder again and measures every folder size. On This computer, Refresh and clicking This computer update each drive's used space without opening the drive.
+Refresh reads the open folder again and measures every folder size. On This computer, Refresh adds a drive that was just plugged in and removes one that was unplugged. Data Finder also does that on its own when Windows changes the drive letters.
 
 Recovery's Choose folder button opens a window for the folder where recovered files are saved. Clear wipes the last recovery scan.
 

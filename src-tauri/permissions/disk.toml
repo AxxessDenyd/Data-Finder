@@ -3,6 +3,7 @@ identifier = "allow-disk"
 description = "Read and change files on this computer"
 commands.allow = [
   "drives",
+  "drive_mask",
   "list_dir",
   "create_item",
   "rename_path",
