@@ -528,3 +528,32 @@ export async function recoveryStop(): Promise<void> {
 export async function recoverySave(ids: number[], folder: string): Promise<{ saved: number; failed: number; folder: string; message: string }> {
   return invoke("recovery_save", { ids, folder });
 }
+
+export async function recoveryClear(): Promise<void> {
+  await invoke("recovery_clear");
+}
+
+export interface EarlierCopy {
+  id: string;
+  created: string;
+  volume: string;
+  device: string;
+}
+
+export interface EarlierEntry {
+  name: string;
+  kind: string;
+  bytes: number | null;
+}
+
+export async function earlierList(): Promise<EarlierCopy[]> {
+  return invoke<EarlierCopy[]>("earlier_list");
+}
+
+export async function earlierEntries(device: string, folder: string): Promise<EarlierEntry[]> {
+  return invoke<EarlierEntry[]>("earlier_entries", { device, folder });
+}
+
+export async function earlierCopy(device: string, folder: string, names: string[], dest: string): Promise<string> {
+  return invoke<string>("earlier_copy", { device, folder, names, dest });
+}

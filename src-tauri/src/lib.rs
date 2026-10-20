@@ -734,6 +734,11 @@ fn recovery_save(ids: Vec<u64>, folder: String) -> Result<recover::RecoverResult
 }
 
 #[tauri::command]
+fn recovery_clear() -> Result<(), String> {
+    recover::clear()
+}
+
+#[tauri::command]
 fn create_item(parent: String, name: String, file: bool) -> Result<(), String> {
     safe_name(&name)?;
     let dest = Path::new(&parent).join(&name);
@@ -1255,6 +1260,159 @@ fn open_path(path: String) -> Result<(), String> {
     }
 }
 
+#[derive(Serialize)]
+struct EarlierCopy {
+    id: String,
+    created: String,
+    volume: String,
+    device: String,
+}
+
+#[derive(Serialize)]
+struct EarlierEntry {
+    name: String,
+    kind: String,
+    bytes: Option<u64>,
+}
+
+fn shadow_device_ok(device: &str) -> bool {
+    match device.strip_prefix(r"\\?\GLOBALROOT\Device\HarddiskVolumeShadowCopy") {
+        Some(rest) => !rest.is_empty() && rest.chars().all(|ch| ch.is_ascii_digit()),
+        None => false,
+    }
+}
+
+fn earlier_relative(folder: &str) -> Result<PathBuf, String> {
+    let folder = folder.trim().trim_matches(|ch: char| ch == '\\' || ch == '/');
+    if folder.chars().any(|ch| ch.is_control()) || folder.split(['\\', '/']).any(|part| part == "." || part == "..") {
+        return Err("That folder cannot be opened".into());
+    }
+    Ok(PathBuf::from(folder))
+}
+
+fn parse_shadows(text: &str) -> Vec<EarlierCopy> {
+    let mut out = Vec::new();
+    let mut created = String::new();
+    let mut volume = String::new();
+    let mut id = String::new();
+    for line in text.lines() {
+        let line = line.trim();
+        if let Some(rest) = line.strip_prefix("Contains ") {
+            if let Some(when) = rest.split("creation time:").nth(1) {
+                created = when.trim().to_string();
+            }
+        } else if let Some(rest) = line.strip_prefix("Shadow Copy ID:") {
+            id = rest.trim().to_string();
+            volume.clear();
+        } else if let Some(rest) = line.strip_prefix("Original Volume:") {
+            let raw = rest.trim();
+            volume = match (raw.find('('), raw.find(')')) {
+                (Some(start), Some(end)) if end > start => raw[start + 1..end].to_string(),
+                _ => raw.to_string(),
+            };
+        } else if let Some(rest) = line.strip_prefix("Shadow Copy Volume:") {
+            let device = rest.trim().to_string();
+            if shadow_device_ok(&device) {
+                out.push(EarlierCopy {
+                    id: if id.is_empty() { device.clone() } else { id.clone() },
+                    created: created.clone(),
+                    volume: if volume.is_empty() { "Disk".into() } else { volume.clone() },
+                    device,
+                });
+            }
+            id.clear();
+            volume.clear();
+        }
+    }
+    out
+}
+
+#[tauri::command]
+fn earlier_list() -> Result<Vec<EarlierCopy>, String> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        let output = Command::new("vssadmin")
+            .args(["list", "shadows"])
+            .creation_flags(0x08000000)
+            .output()
+            .map_err(|err| err.to_string())?;
+        let text = String::from_utf8_lossy(&output.stdout);
+        let err = String::from_utf8_lossy(&output.stderr);
+        let copies = parse_shadows(&text);
+        if copies.is_empty() && !output.status.success() {
+            let message = if text.trim().is_empty() { err.trim().to_string() } else { text.trim().to_string() };
+            let lower = message.to_lowercase();
+            if lower.contains("denied") || lower.contains("privilege") || lower.contains("administrator") {
+                return Err("Earlier copies need Data Finder to run as administrator.".into());
+            }
+            if lower.contains("no items") || lower.contains("no shadow") {
+                return Ok(Vec::new());
+            }
+            let short = message.lines().next().unwrap_or("Could not read earlier copies").to_string();
+            return Err(short);
+        }
+        Ok(copies)
+    }
+    #[cfg(not(windows))]
+    {
+        Err("Earlier copies work in the Windows program".into())
+    }
+}
+
+#[tauri::command]
+fn earlier_entries(device: String, folder: String) -> Result<Vec<EarlierEntry>, String> {
+    if !shadow_device_ok(&device) {
+        return Err("That earlier copy cannot be opened".into());
+    }
+    let dir = PathBuf::from(&device).join(earlier_relative(&folder)?);
+    let listed = list_dir_sync(dir.to_str().ok_or("That folder cannot be opened")?)?;
+    Ok(listed
+        .into_iter()
+        .map(|entry| EarlierEntry { name: entry.name, kind: entry.kind, bytes: entry.bytes })
+        .collect())
+}
+
+#[tauri::command]
+async fn earlier_copy(device: String, folder: String, names: Vec<String>, dest: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        if !shadow_device_ok(&device) {
+            return Err("That earlier copy cannot be opened".into());
+        }
+        let dest_text = dest.trim();
+        if dest_text.is_empty() || dest_text.starts_with(r"\\?\GLOBALROOT") {
+            return Err("Choose a normal folder to copy into".into());
+        }
+        let dest_path = PathBuf::from(dest_text);
+        fs::create_dir_all(&dest_path).map_err(|err| err.to_string())?;
+        let base = PathBuf::from(&device).join(earlier_relative(&folder)?);
+        let mut files = 0u64;
+        let mut bytes = 0u64;
+        let mut skipped = 0u64;
+        let mut copied = 0u32;
+        for name in names {
+            if name.is_empty() || name.contains('\\') || name.contains('/') || name.contains("..") {
+                skipped += 1;
+                continue;
+            }
+            let from = base.join(&name);
+            if !from.exists() {
+                skipped += 1;
+                continue;
+            }
+            copy_tree(&from, &dest_path.join(&name), &mut files, &mut bytes, &mut skipped, 0);
+            copied += 1;
+        }
+        if copied == 0 {
+            return Err("None of those items could be copied".into());
+        }
+        let extra = if skipped == 0 { String::new() } else { format!(" · {skipped} skipped") };
+        Ok(format!("Copied {files} file(s){extra}"))
+    })
+    .await
+    .map_err(|err| err.to_string())?
+}
+
 #[tauri::command]
 fn choose_folder() -> Result<String, String> {
     #[cfg(windows)]
@@ -1299,6 +1457,7 @@ pub fn run() {
             recovery_status,
             recovery_stop,
             recovery_save,
+            recovery_clear,
             unmount_drive,
             mount_image,
             format_drive,
@@ -1311,7 +1470,10 @@ pub fn run() {
             snapshot_restore,
             snapshot_remove,
             open_path,
-            choose_folder
+            choose_folder,
+            earlier_list,
+            earlier_entries,
+            earlier_copy
         ])
         .run(tauri::generate_context!())
         .expect("Data Finder failed to start");

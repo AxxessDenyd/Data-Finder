@@ -119,6 +119,21 @@ pub fn stop() {
     }
 }
 
+pub fn clear() -> Result<(), String> {
+    let mut run = state().lock().unwrap_or_else(|err| err.into_inner());
+    if run.running {
+        return Err("Stop the scan before clearing it".into());
+    }
+    run.done = false;
+    run.phase = "Ready".into();
+    run.scanned_mb = 0;
+    run.total_mb = 0;
+    run.error.clear();
+    run.letter.clear();
+    run.hits.clear();
+    Ok(())
+}
+
 pub fn start(letter: String, kinds: Vec<String>, deep: bool) -> Result<(), String> {
     let letter = normalize_letter(&letter).ok_or_else(|| "Choose a drive letter".to_string())?;
     {

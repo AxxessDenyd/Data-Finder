@@ -73,7 +73,7 @@ import {
   type ViewMode,
 } from "@/lib/file-store";
 import { childrenOf, driveCaption, formatDate, formatSize, pathIds, resolvePath, typeLabel, type FsNode } from "@/lib/vfs";
-import { chooseFolder, diskPath, isDesktop, isDiskId, listSnapshots, mapNetwork, measurePath, mountVolume, openExternal, recoverySave, recoveryStart, recoveryStatus, recoveryStop, removeSnapshot, restoreSnapshot, withoutDisk, type DiskSnapshot, type ExactSize, type RecoveryStatus } from "@/lib/disk";
+import { chooseFolder, diskPath, earlierCopy, earlierEntries, earlierList, isDesktop, isDiskId, listSnapshots, mapNetwork, measurePath, mountVolume, openExternal, recoveryClear, recoverySave, recoveryStart, recoveryStatus, recoveryStop, removeSnapshot, restoreSnapshot, withoutDisk, type DiskSnapshot, type EarlierCopy, type EarlierEntry, type ExactSize, type RecoveryStatus } from "@/lib/disk";
 import { aboutInfo, manualSections } from "@/lib/manual";
 
 const UI_KEY = "data-finder-ui";
@@ -654,6 +654,7 @@ function HomeRibbon() {
         <MenuAction label="Save snapshot" icon={<History className="size-4" />} onClick={() => store().takeSnapshot()} />
         <MenuAction label="Snapshots" icon={<History className="size-4" />} onClick={() => store().openDialog({ kind: "snaps" })} />
         <MenuAction label="User folders" icon={<Folder className="size-4" />} onClick={() => store().openDialog({ kind: "snap-user" })} />
+        <MenuAction label="Earlier copies" icon={<RotateCcw className="size-4" />} onClick={() => store().openDialog({ kind: "earlier" })} />
         <div className="my-1 h-px bg-line" />
         <MenuAction label="Disk use" icon={<HardDrive className="size-4" />} onClick={() => openSpaceReport()} />
         <MenuAction label="Copy list" icon={<FileText className="size-4" />} onClick={() => void copyListing()} />
@@ -676,9 +677,9 @@ function HomeRibbon() {
         if (node) store().openDialog({ kind: "rename", id: node.id, name: node.name });
       }} />
       <RibbonButton label="Delete" disabled={!selected.length} icon={<Trash2 className="size-4" />} onClick={() => selected.length && store().openDialog({ kind: "delete", ids: selected })} />
-      <RibbonButton label={split ? "One pane" : "Two panes"} icon={<Columns2 className="size-4" />} onClick={() => store().toggleSplit()} />
       <SortMenu />
       <ViewMenu />
+      <RibbonButton label={split ? "One pane" : "Two panes"} icon={<Columns2 className="size-4" />} onClick={() => store().toggleSplit()} />
     </div>
   );
 }
@@ -1019,7 +1020,7 @@ async function copyListing() {
 
 function NavPlaces({ pane }: { pane: 0 | 1 }) {
   const pins = useFiles((s) => s.pins);
-  const pinsOpen = useFiles((s) => s.pinsOpen);
+  const pinsOpen = useFiles((s) => s.pinsOpen[pane]);
   const recent = useFiles((s) => s.recentPaths);
   const [recentOpen, setRecentOpen] = useState(false);
   const open = (path: string) => void useFiles.getState().openTypedPath(path);
@@ -1045,7 +1046,7 @@ function NavPlaces({ pane }: { pane: 0 | 1 }) {
   return (
     <>
       <div className="border-b border-line py-1">
-        <button type="button" className="flex w-full items-center gap-1 px-2 py-1 text-left text-[11px] font-semibold text-muted" onClick={() => useFiles.getState().setPinsOpen(!pinsOpen)}>
+        <button type="button" className="flex w-full items-center gap-1 px-2 py-1 text-left text-[11px] font-semibold text-muted" onClick={() => useFiles.getState().setPinsOpen(pane, !pinsOpen)}>
           {pinsOpen ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
           Pinned
         </button>
@@ -2199,6 +2200,106 @@ function SnapshotWindow() {
   );
 }
 
+function EarlierDialog() {
+  const [rows, setRows] = useState<EarlierCopy[] | null>(null);
+  const [error, setError] = useState("");
+  const [picked, setPicked] = useState<EarlierCopy | null>(null);
+  const [folder, setFolder] = useState("");
+  const [entries, setEntries] = useState<EarlierEntry[]>([]);
+  const [selected, setSelected] = useState<Record<string, boolean>>({});
+  const [dest, setDest] = useState("");
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    void earlierList().then(setRows).catch((cause: unknown) => {
+      setRows([]);
+      setError(cause instanceof Error ? cause.message : "Could not read earlier copies");
+    });
+  }, []);
+  const openCopy = (copy: EarlierCopy, path: string) => {
+    setPicked(copy);
+    setFolder(path);
+    setSelected({});
+    setNote("");
+    void earlierEntries(copy.device, path).then(setEntries).catch((cause: unknown) => {
+      setEntries([]);
+      setNote(cause instanceof Error ? cause.message : "Could not open that folder");
+    });
+  };
+  const names = entries.filter((entry) => selected[entry.name]).map((entry) => entry.name);
+  const copyOut = () => {
+    if (!picked) return;
+    if (!names.length) {
+      setNote("Select a file or folder");
+      return;
+    }
+    if (!dest.trim()) {
+      setNote("Choose a folder to copy into");
+      return;
+    }
+    setBusy(true);
+    void earlierCopy(picked.device, folder, names, dest.trim())
+      .then((message) => setNote(message))
+      .catch((cause: unknown) => setNote(cause instanceof Error ? cause.message : "Could not copy those items"))
+      .finally(() => setBusy(false));
+  };
+  return (
+    <div>
+      <div className="flex items-center justify-between gap-2">
+        <h2 className="text-base font-semibold">Earlier copies</h2>
+        <button type="button" aria-label="Close" onClick={() => useFiles.getState().openDialog(null)}><X className="size-4" /></button>
+      </div>
+      <p className="mt-1 text-sm text-muted">A snapshot copies a folder as it is right now. Earlier copies are restore points Windows already saved. Copy files out of one. The restore point is not changed.</p>
+      {error && <p className="mt-2 text-sm text-danger">{error}</p>}
+      {!picked && (
+        <ul className="mt-3 max-h-72 overflow-auto border border-line">
+          {rows === null && <li className="px-2 py-3 text-sm text-muted">Reading restore points…</li>}
+          {rows?.length === 0 && !error && <li className="px-2 py-3 text-sm text-muted">Windows has no earlier copies on this PC.</li>}
+          {rows?.map((copy) => (
+            <li key={copy.id}>
+              <button type="button" className="block w-full px-2 py-2 text-left text-sm hover:bg-header" onClick={() => openCopy(copy, "")}>
+                <span className="block">{copy.volume} · {copy.created || "Restore point"}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {picked && (
+        <>
+          <div className="mt-3 flex items-center gap-2 text-sm">
+            <button type="button" className="min-h-9 px-2" onClick={() => { setPicked(null); setEntries([]); setFolder(""); }}>All copies</button>
+            <button type="button" className="min-h-9 px-2" disabled={!folder} onClick={() => openCopy(picked, folder.split("\\").filter(Boolean).slice(0, -1).join("\\"))}>Up</button>
+            <span className="truncate text-muted">{picked.volume}{folder ? `\\${folder}` : "\\"}</span>
+          </div>
+          <ul className="mt-2 max-h-64 overflow-auto border border-line">
+            {entries.length === 0 && <li className="px-2 py-3 text-sm text-muted">This folder is empty.</li>}
+            {entries.map((entry) => (
+              <li key={entry.name} className="flex items-center gap-2 border-t border-line px-2 py-1 text-sm first:border-t-0">
+                <input type="checkbox" checked={!!selected[entry.name]} aria-label={`Select ${entry.name}`} onChange={() => setSelected((current) => ({ ...current, [entry.name]: !current[entry.name] }))} />
+                {entry.kind === "dir" ? (
+                  <button type="button" className="min-w-0 flex-1 truncate text-left hover:underline" onClick={() => openCopy(picked, folder ? `${folder}\\${entry.name}` : entry.name)}>{entry.name}</button>
+                ) : (
+                  <span className="min-w-0 flex-1 truncate">{entry.name}</span>
+                )}
+                <span className="shrink-0 tabular-nums text-muted">{entry.kind === "dir" ? "Folder" : formatSize(entry.bytes) || "0 B"}</span>
+              </li>
+            ))}
+          </ul>
+          <label className="mt-3 block text-sm">
+            Copy to
+            <input value={dest} onChange={(e) => setDest(e.target.value)} placeholder="D:\Restored" className="mt-1 h-11 w-full border border-line px-2" aria-label="Folder to copy into" />
+          </label>
+          <div className="mt-3 flex justify-end gap-2">
+            <button type="button" className="min-h-11 px-3" onClick={() => void chooseFolder().then(setDest).catch((cause: unknown) => setNote(cause instanceof Error ? cause.message : "No folder was chosen"))}>Choose folder</button>
+            <button type="button" className="min-h-11 bg-accent px-3 text-accent-ink disabled:opacity-40" disabled={busy || names.length === 0} onClick={copyOut}>Copy {names.length || ""} selected</button>
+          </div>
+        </>
+      )}
+      {note && <p className="mt-2 text-sm">{note}</p>}
+    </div>
+  );
+}
+
 function Dialogs() {
   const dialog = useFiles((s) => s.dialog);
   const nodes = useFiles((s) => s.nodes);
@@ -2213,7 +2314,7 @@ function Dialogs() {
   if (!dialog) return null;
   return (
     <div className="fixed inset-0 z-40 grid place-items-center bg-scrim p-4" onMouseDown={() => useFiles.getState().openDialog(null)}>
-      <div role="dialog" aria-modal="true" className={"w-full border border-line bg-pane p-4 shadow-lg " + (dialog.kind === "compare" || dialog.kind === "snaps" ? "max-w-3xl" : dialog.kind === "search" || dialog.kind === "operation" ? "max-w-2xl" : "max-w-lg")} onMouseDown={(e) => e.stopPropagation()}>
+      <div role="dialog" aria-modal="true" className={"w-full border border-line bg-pane p-4 shadow-lg " + (dialog.kind === "compare" || dialog.kind === "snaps" || dialog.kind === "earlier" ? "max-w-3xl" : dialog.kind === "search" || dialog.kind === "operation" ? "max-w-2xl" : "max-w-lg")} onMouseDown={(e) => e.stopPropagation()}>
         {(dialog.kind === "new" || dialog.kind === "rename") && (
           <form
             onSubmit={(e) => {
@@ -2304,6 +2405,7 @@ function Dialogs() {
         )}
         {dialog.kind === "network" && <NetworkDialog location={dialog.location} />}
         {dialog.kind === "snaps" && <SnapshotWindow />}
+        {dialog.kind === "earlier" && <EarlierDialog />}
         {dialog.kind === "snap-user" && (
           <form
             onSubmit={(e) => {
@@ -2964,6 +3066,7 @@ function RecoveryPage() {
         </label>
         <button type="button" className="h-9 rounded-md bg-accent px-3 text-sm text-accent-ink" disabled={status?.running} onClick={start}>Scan</button>
         <button type="button" className="h-9 rounded-md border border-line px-3 text-sm" disabled={!status?.running} onClick={() => void recoveryStop()}>Stop</button>
+        <button type="button" className="h-9 rounded-md border border-line px-3 text-sm" disabled={!!status?.running || ((status?.hits.length ?? 0) === 0 && !status?.error)} onClick={() => { setPicked({}); setNote(""); void recoveryClear().then(() => setStatus((current) => current ? { ...current, hits: [], phase: "Ready", done: false, error: "", scanned_mb: 0, total_mb: 0 } : current)).catch((error: unknown) => setNote(error instanceof Error ? error.message : "Could not clear the scan")); }}>Clear</button>
         <p className="min-w-0 flex-1 text-sm text-muted">
           {status?.phase || "Ready"}
           {status?.total_mb ? ` · ${status.scanned_mb} MB of ${status.total_mb} MB` : status?.scanned_mb ? ` · ${status.scanned_mb} MB` : ""}
@@ -3113,7 +3216,7 @@ export function FileManager() {
         showExt: state.showExt,
         previewOpen: state.previewOpen,
         snaps: state.snaps,
-        uiRev: 4,
+        uiRev: 5,
         pins: state.pins,
         pinsOpen: state.pinsOpen,
         recentPaths: state.recentPaths,

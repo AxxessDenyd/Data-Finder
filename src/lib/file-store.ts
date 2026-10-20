@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { diskCreate, diskPath, diskRemoveNamed, diskRename, diskTransfer, fetchDrives, forgetDisk, formatVolume, isDesktop, isDiskId, knownFolders, listSnapshots, loadChildren, loadDesktopComputer, mapNetwork, measureChildren, mountImage, mountVolume, openDiskFile, pickFolder, removeSnapshot, restoreSnapshot, saveSnapshot, setDiskPath, unmountVolume, type DiskJob, type DiskSnapshot, type KnownFolder } from "@/lib/disk";
+import { diskCreate, diskPath, diskRemoveNamed, diskRename, diskTransfer, fetchDrives, forgetDisk, formatVolume, isDesktop, isDiskId, knownFolders, listSnapshots, loadChildren, loadDesktopComputer, mapNetwork, measurePath, mountImage, mountVolume, openDiskFile, pickFolder, removeSnapshot, restoreSnapshot, saveSnapshot, setDiskPath, unmountVolume, type DiskJob, type DiskSnapshot, type KnownFolder } from "@/lib/disk";
 import {
   childrenOf,
   cloneSubtree,
@@ -103,7 +103,8 @@ export type DialogState =
   | { kind: "network"; location: boolean }
   | { kind: "snaps" }
   | { kind: "snap-user" }
-  | { kind: "snap-dest" };
+  | { kind: "snap-dest" }
+  | { kind: "earlier" };
 
 export interface SearchRequest {
   query?: string;
@@ -270,7 +271,7 @@ interface FileState extends FsSnapshot {
   helpQuery: string;
   showAllDrives: boolean;
   pins: string[];
-  pinsOpen: boolean;
+  pinsOpen: [boolean, boolean];
   recentPaths: string[];
   quickPlaces: KnownFolder[];
   readerId: string | null;
@@ -280,7 +281,7 @@ const defaultFilters: Filters = {
   showHidden: false,
   showReadonly: true,
   showSystem: true,
-  showBlocked: true,
+  showBlocked: false,
   kind: "all",
   ext: "",
   attr: "any",
@@ -338,6 +339,91 @@ function remember(recent: string[], id: string) {
 const seed = createSeed();
 const sizedSeed = { ...seed, nodes: fillFolderSizes(seed.nodes, seed.order) };
 
+async function refreshDriveStats(announce: boolean) {
+  if (!isDesktop()) return;
+  try {
+    const fresh = await fetchDrives();
+    useFiles.setState((current) => {
+      const nodes = { ...current.nodes };
+      const used = new Set<string>();
+      for (const id of current.order.pc ?? []) {
+        const node = nodes[id];
+        if (!node || node.kind !== "drive") continue;
+        const match = fresh.find((item) => !used.has(item.id) && item.name.toLowerCase() === node.name.toLowerCase());
+        if (!match) continue;
+        used.add(match.id);
+        const nextPath = diskPath(match.id);
+        if (nextPath) setDiskPath(id, nextPath);
+        forgetDisk(match.id);
+        nodes[id] = {
+          ...node,
+          mounted: match.mounted,
+          capacity: match.capacity,
+          free: match.free,
+          note: match.note,
+          label: match.label,
+          system: match.system,
+        };
+      }
+      for (const item of fresh) {
+        if (!used.has(item.id)) forgetDisk(item.id);
+      }
+      return announce ? { nodes, status: "Drive sizes updated" } : { nodes };
+    });
+  } catch (error) {
+    if (announce) useFiles.setState({ status: error instanceof Error ? error.message : "Could not refresh drive sizes" });
+  }
+}
+
+async function measureDirs(folder: string, token: number, ids: string[]) {
+  let cursor = 0;
+  const worker = async () => {
+    for (;;) {
+      if (!measureStill(folder, token)) return;
+      const index = cursor;
+      cursor += 1;
+      if (index >= ids.length) return;
+      const id = ids[index];
+      const path = diskPath(id);
+      if (!path) continue;
+      try {
+        const exact = await measurePath(path);
+        if (!measureStill(folder, token)) return;
+        useFiles.setState((state) => {
+          const current = state.nodes[id];
+          if (!current) return {};
+          return {
+            nodes: {
+              ...state.nodes,
+              [id]: { ...current, bytes: exact.blocked ? null : exact.bytes, approx: !exact.exact, blocked: exact.blocked },
+            },
+          };
+        });
+      } catch {
+        /* keep the size already shown */
+      }
+    }
+  };
+  await Promise.all([worker(), worker()]);
+  if (!measureStill(folder, token)) return;
+  useFiles.setState((state) => {
+    const nodes = { ...state.nodes };
+    let sum = 0;
+    let complete = true;
+    for (const id of state.order[folder] ?? []) {
+      const node = nodes[id];
+      if (!node) continue;
+      if (node.bytes == null) complete = false;
+      else sum += node.bytes;
+      if (node.approx || node.blocked) complete = false;
+    }
+    if (nodes[folder] && nodes[folder].kind !== "computer" && nodes[folder].kind !== "drive") {
+      nodes[folder] = { ...nodes[folder], bytes: sum, approx: !complete };
+    }
+    return { nodes, measuring: false, status: `Sizes updated · ${displayPath(state, folder)}` };
+  });
+}
+
 export interface UiPrefs {
   split?: boolean;
   diff?: boolean;
@@ -366,7 +452,7 @@ export interface UiPrefs {
   previewOpen?: boolean;
   snaps?: Array<ShadowCopy & { path: string }>;
   pins?: string[];
-  pinsOpen?: boolean;
+  pinsOpen?: boolean | [boolean, boolean];
   recentPaths?: string[];
   showAllDrives?: boolean;
   uiRev?: number;
@@ -385,7 +471,7 @@ interface Actions {
   setHelpPage: (page: "manual" | "about") => void;
   setHelpQuery: (query: string) => void;
   setShowAllDrives: (on: boolean) => void;
-  setPinsOpen: (open: boolean) => void;
+  setPinsOpen: (index: 0 | 1, open: boolean) => void;
   rememberPath: (path: string) => void;
   reloadDrives: () => Promise<void>;
   saveUserSnapshot: (folder?: string) => Promise<void>;
@@ -664,6 +750,18 @@ async function reloadDiskFolder(id: string) {
   useFiles.setState((state) => {
     const cleaned = dropLoaded(state.nodes, state.order, id);
     const nodes = { ...cleaned.nodes, ...listed.nodes };
+    const previous = new Map<string, FsNode>();
+    for (const child of state.order[id] ?? []) {
+      const node = state.nodes[child];
+      if (node) previous.set(node.name.toLowerCase(), node);
+    }
+    for (const childId of listed.ids) {
+      const child = nodes[childId];
+      const old = child ? previous.get(child.name.toLowerCase()) : undefined;
+      if (child && old && child.kind !== "file" && child.bytes == null) {
+        nodes[childId] = { ...child, bytes: old.bytes, approx: old.approx, blocked: old.blocked };
+      }
+    }
     const order = { ...cleaned.order, [id]: listed.ids };
     const panes = state.panes.map((pane) => {
       const pathId = nodes[pane.pathId] ? pane.pathId : nodes[id] ? id : "c";
@@ -780,7 +878,7 @@ export const useFiles = create<FileState & Actions>((set, get) => ({
   helpQuery: "",
   showAllDrives: false,
   pins: [],
-  pinsOpen: true,
+  pinsOpen: [true, true],
   recentPaths: [],
   quickPlaces: [],
   snaps: [],
@@ -791,7 +889,12 @@ export const useFiles = create<FileState & Actions>((set, get) => ({
   setHelpPage: (helpPage) => set({ helpPage }),
   setHelpQuery: (helpQuery) => set({ helpQuery, helpPage: "manual" }),
   setShowAllDrives: (showAllDrives) => set({ showAllDrives, status: showAllDrives ? "Showing every drive" : "Showing mounted drives" }),
-  setPinsOpen: (pinsOpen) => set({ pinsOpen }),
+  setPinsOpen: (index, open) =>
+    set((state) => {
+      const pinsOpen: [boolean, boolean] = [state.pinsOpen[0], state.pinsOpen[1]];
+      pinsOpen[index] = open;
+      return { pinsOpen };
+    }),
   rememberPath: (path) =>
     set((state) => ({
       recentPaths: [path, ...state.recentPaths.filter((item) => item.toLowerCase() !== path.toLowerCase())].slice(0, 12),
@@ -908,6 +1011,10 @@ export const useFiles = create<FileState & Actions>((set, get) => ({
     });
     const opened = diskPath(id);
     if (opened) get().rememberPath(opened);
+    if (node.kind === "computer") {
+      void refreshDriveStats(true);
+      return;
+    }
     if (get().calcDirs) void get().calcSizes(index);
   },
 
@@ -965,9 +1072,15 @@ export const useFiles = create<FileState & Actions>((set, get) => ({
   refresh: (index) => {
     const i = index ?? get().active;
     const id = get().panes[i].pathId;
+    const node = get().nodes[id];
+    if (!node || node.kind === "computer") {
+      void refreshDriveStats(true);
+      return;
+    }
     if (isDiskId(id)) {
       void reloadDiskFolder(id)
         .then(() => {
+          void refreshDriveStats(false);
           if (get().calcDirs) get().calcSizes(i);
           else set({ status: `Refreshed ${get().nodes[id]?.name ?? "folder"}` });
         })
@@ -1586,48 +1699,21 @@ export const useFiles = create<FileState & Actions>((set, get) => ({
     const state = get();
     const i = index ?? state.active;
     const folder = state.panes[i].pathId;
+    const node = state.nodes[folder];
+    if (node?.kind === "computer") {
+      void refreshDriveStats(true);
+      return;
+    }
     if (!state.calcDirs) return;
     if (isDiskId(folder)) {
+      const ids = (state.order[folder] ?? []).filter((id) => state.nodes[id]?.kind === "dir");
       const token = nextMeasure(folder);
-      set({ measuring: true, status: "Measuring folders" });
-      void measureChildren(folder)
-        .then((sizes) => {
-          if (!measureStill(folder, token)) return;
-          set((current) => {
-            const nodes = { ...current.nodes };
-            let sum = 0;
-            let complete = true;
-            for (const id of current.order[folder] ?? []) {
-              const node = nodes[id];
-              if (!node) continue;
-              if (node.kind === "file") {
-                sum += node.bytes ?? 0;
-                continue;
-              }
-              const measured = sizes[node.name.toLowerCase()];
-              if (!measured) {
-                complete = false;
-                continue;
-              }
-              nodes[id] = { ...node, bytes: measured.blocked ? null : measured.bytes, approx: measured.partial, blocked: measured.blocked };
-              sum += measured.bytes;
-              if (measured.partial) complete = false;
-            }
-            if (nodes[folder] && nodes[folder].kind !== "computer") nodes[folder] = { ...nodes[folder], bytes: sum, approx: !complete };
-            const stillHere = current.panes.some((pane) => pane.pathId === folder);
-            return {
-              nodes,
-              measuring: false,
-              status: stillHere
-                ? `${complete ? "Folder sizes updated" : "Folder sizes updated, largest ones are partial"} · ${displayPath(current, folder)}`
-                : current.status,
-            };
-          });
-        })
-        .catch((error: unknown) => {
-          if (!measureStill(folder, token)) return;
-          set({ measuring: false, status: error instanceof Error ? error.message : "Could not measure those folders" });
-        });
+      if (!ids.length) {
+        set({ measuring: false, status: `Sizes updated · ${displayPath(state, folder)}` });
+        return;
+      }
+      set({ measuring: true, status: "Measuring folder sizes" });
+      void measureDirs(folder, token, ids);
       return;
     }
     set({
@@ -2360,6 +2446,11 @@ export const useFiles = create<FileState & Actions>((set, get) => ({
       const seq = catalog?.seq ?? state.seq;
       const filters = normalizeFilters({ ...state.filters, ...prefs.filters });
       if ((prefs.uiRev ?? 0) < 2) filters.showHidden = false;
+      if ((prefs.uiRev ?? 0) < 5) filters.showBlocked = false;
+      const savedPins = prefs.pinsOpen;
+      const pinsOpen: [boolean, boolean] = Array.isArray(savedPins)
+        ? [savedPins[0] !== false, savedPins[1] !== false]
+        : [savedPins !== false, savedPins !== false];
       return {
         split: false,
         diff: prefs.diff ?? state.diff,
@@ -2381,10 +2472,10 @@ export const useFiles = create<FileState & Actions>((set, get) => ({
         previewOpen: prefs.previewOpen ?? state.previewOpen,
         snaps: prefs.snaps ?? state.snaps,
         pins: prefs.pins ?? state.pins,
-        pinsOpen: prefs.pinsOpen ?? true,
+        pinsOpen,
         recentPaths: prefs.recentPaths ?? state.recentPaths,
         showAllDrives: prefs.showAllDrives ?? false,
-        uiRev: 4,
+        uiRev: 5,
         nodes,
         order,
         seq,
@@ -2548,7 +2639,7 @@ function normalizeFilters(raw: Partial<Filters> & { visibility?: Visibility }): 
       showSystem = true;
     }
   }
-  return { ...defaultFilters, ...raw, showHidden, showReadonly, showSystem, showBlocked: raw.showBlocked ?? true, maxAgeDays: raw.maxAgeDays ?? 0, attr: "any" };
+  return { ...defaultFilters, ...raw, showHidden, showReadonly, showSystem, showBlocked: raw.showBlocked ?? false, maxAgeDays: raw.maxAgeDays ?? 0, attr: "any" };
 }
 
 function passes(
@@ -2590,6 +2681,13 @@ function sortRows(rows: ListRow[], key: SortKey, dir: "asc" | "desc") {
   return rows;
 }
 
+function shownBytes(state: FileState, node: FsNode): number | null {
+  if (node.kind === "file") return node.bytes;
+  if (node.kind === "drive" && typeof node.capacity === "number") return Math.max(0, node.capacity - (node.free ?? 0));
+  if (!state.calcDirs) return null;
+  return node.bytes;
+}
+
 export function listing(state: FileState, index: 0 | 1): { rows: ListRow[]; banner: string | null; total: number } {
   const paneState = state.panes[index];
   const shadow = state.shadowPane === index
@@ -2621,7 +2719,7 @@ export function listing(state: FileState, index: 0 | 1): { rows: ListRow[]; bann
       id: node.id,
       nodeId: node.id,
       name: node.name,
-      bytes: !state.calcDirs && node.kind !== "file" ? null : node.bytes,
+      bytes: shownBytes(state, node),
       approx: state.calcDirs ? node.approx : undefined,
       modified: node.modified,
       hidden: node.hidden,
@@ -2641,7 +2739,7 @@ export function listing(state: FileState, index: 0 | 1): { rows: ListRow[]; bann
         id: node.id,
         nodeId: node.id,
         name: node.name,
-        bytes: !state.calcDirs && node.kind !== "file" ? null : node.bytes,
+        bytes: shownBytes(state, node),
       approx: state.calcDirs ? node.approx : undefined,
         modified: node.modified,
         hidden: node.hidden,

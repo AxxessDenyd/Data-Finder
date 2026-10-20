@@ -15,23 +15,25 @@ The same guide is inside the program. Open the Help tab, then Manual. Search the
 
 The program opens in one pane. The folder tree is on the left and the file list is on the right. The tabs are Home, Find, Recovery, and Help.
 
-Home is one bar: New, Go, Drives, Filter, Tools, and Settings, then Cut, Copy, Paste, Rename, Delete, Two panes, Sort, and View. The tabs are Home, Find, Recovery, and Help. The menu button holds Second pane, Dark mode, Help, and About.
+Home is one bar: New, Go, Drives, Filter, Tools, and Settings, then Cut, Copy, Paste, Rename, Delete, Sort, and View, then Two panes. The tabs are Home, Find, Recovery, and Help. The menu button holds Second pane, Dark mode, Help, and About.
 
 Double-click a file to open it in the program Windows already uses for that file. Folder sizes are the full measured size. Recent, in the folder tree, folds open and closed.
 
 The newest installer and portable program are the Latest release on GitHub.
 
-The search box sits on the Home, Find, Recovery, and Help bar, at the right. Refresh sits next to the path. Check boxes sit beside each name and can select more than one file or folder at a time. Pinned and Recent are at the top of the folder tree, and each can be folded. Pinned starts open. The star on a folder pins or unpins it, and the X unpins a folder from the list. Desktop, Documents, Downloads, Pictures, Music, and Videos start pinned.
+The search box sits on the Home, Find, Recovery, and Help bar, at the right. Refresh sits next to the path. Check boxes sit beside each name and can select more than one file or folder at a time. Pinned and Recent are at the top of the folder tree, and each can be folded. Pinned starts open. Folding it in one pane leaves the other pane as it was. The star on a folder pins or unpins it, and the X unpins a folder from the list. Desktop, Documents, Downloads, Pictures, Music, and Videos start pinned.
 
-Recovery's Choose folder button opens a window for the folder where recovered files are saved.
+Refresh reads the open folder again and measures every folder size. On This computer, Refresh and clicking This computer update each drive's used space without opening the drive.
 
-View, then Show, includes Hidden items, Read-only items, System items, and No access folders. No access folders starts checked. Uncheck it to hide folders Windows will not open, in the file list and in the folder tree. The Show menu stays open while the pointer moves onto it.
+Recovery's Choose folder button opens a window for the folder where recovered files are saved. Clear wipes the last recovery scan.
+
+View, then Show, includes Hidden items, Read-only items, System items, and No access folders. No access folders starts unchecked. Check it to show folders Windows will not open, in the file list and in the folder tree. The Show menu stays open while the pointer moves onto it.
 
 Info measures the selected file or folder and shows the exact size in bytes. Recovery scans a drive for deleted files and saves the ones you pick onto a different drive. Deep scan also searches free space. Run Data Finder as administrator if a scan cannot read the drive.
 
 Drives you can see are mounted. Show every drive, in the Drives menu, lists the rest. That menu also mounts a drive that is waiting for a letter, maps a network drive, adds a network location, and disconnects a network drive.
 
-A snapshot asks where to save the copy. Leave the folder blank to keep it on this PC, or choose a folder on an external drive. The Snapshots window lists each copy. User folders can copy Desktop, Documents, Downloads, Pictures, Music, and Videos, and it asks where to save them because that can use a lot of space.
+A snapshot asks where to save the copy. Leave the folder blank to keep it on this PC, or choose a folder on an external drive. The Snapshots window lists each copy. User folders can copy Desktop, Documents, Downloads, Pictures, Music, and Videos, and it asks where to save them because that can use a lot of space. Earlier copies is separate: it reads restore points Windows already saved and copies files out of them. It is not a snapshot.
 
 About links open in the browser.
 
@@ -51,15 +53,15 @@ Select several files and folders, then open Details. Each item is listed with it
 - **Go:** Up, This computer, Refresh, and Jump to path.
 - **Drives:** show every drive, mount a waiting drive, map a network drive, add a network location, and disconnect.
 - **Filter:** sort order, file kind, and how recently an item changed.
-- **Tools:** snapshots, disk use, copy list, the queue, and activity.
+- **Tools:** snapshots, earlier copies, disk use, copy list, the queue, and activity.
 - **Settings:** dark mode, larger text, folder measuring, unmount, and format.
 - **Cut, Copy, Paste, Rename, Delete:** act on the selection.
-- **Two panes:** sits between Delete and Sort. It opens a second folder, then the button says One pane.
 - **Sort and View:** sort the folder, and change icons, details, check boxes, and the Show list.
+- **Two panes:** sits to the right of View. It opens a second folder, then the button says One pane.
 
 ## One pane and two panes
 
-The **Two panes** button sits between Delete and Sort. Click it and a second folder opens underneath. The button then says **One pane**. Click it to close the second folder.
+The **Two panes** button sits to the right of View. Click it and a second folder opens underneath. The button then says **One pane**. Click it to close the second folder.
 
 Click a pane to make it active. The active pane has a blue edge. F6 moves between panes. Gaps tints names that exist in only one pane. Copy missing adds those names. Update other also replaces files that are older than the active pane.
 

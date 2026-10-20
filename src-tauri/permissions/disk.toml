@@ -16,6 +16,7 @@ commands.allow = [
   "recovery_status",
   "recovery_stop",
   "recovery_save",
+  "recovery_clear",
   "unmount_drive",
   "mount_image",
   "format_drive",
@@ -29,4 +30,7 @@ commands.allow = [
   "snapshot_remove",
   "open_path",
   "choose_folder",
+  "earlier_list",
+  "earlier_entries",
+  "earlier_copy",
 ]
