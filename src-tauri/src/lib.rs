@@ -1638,6 +1638,28 @@ fn ps_quote(value: &str) -> Result<String, String> {
     Ok(format!("'{}'", value.replace('\'', "''")))
 }
 
+fn recovery_groups(raw: &str) -> Result<Vec<String>, String> {
+    let mut groups = Vec::new();
+    let mut digits = String::new();
+    for ch in raw.chars().chain(std::iter::once('\n')) {
+        if ch.is_ascii_digit() {
+            digits.push(ch);
+            if digits.len() > 48 {
+                digits.clear();
+            }
+        } else if !digits.is_empty() {
+            if digits.len() == 48 {
+                groups.push(recovery_digits(&digits)?);
+            }
+            digits.clear();
+        }
+    }
+    if groups.is_empty() {
+        return Err("No recovery key was found to save".into());
+    }
+    Ok(groups)
+}
+
 fn recovery_digits(raw: &str) -> Result<String, String> {
     let digits: String = raw.chars().filter(|ch| ch.is_ascii_digit()).collect();
     if digits.len() != 48 {
@@ -1902,9 +1924,56 @@ Save ('key:' + $key)
 }
 
 #[tauri::command]
+async fn bitlocker_read_key(drive: String) -> Result<String, String> {
+    let letter = one_drive_letter(&drive)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let body = format!(
+            r#"$mount = '{letter}:'
+$vol = Get-BitLockerVolume -MountPoint $mount
+if ([string]$vol.LockStatus -eq 'Locked') {{ throw 'This drive is locked. Windows will not show a recovery key until the drive is unlocked.' }}
+$rows = New-Object System.Collections.Generic.List[string]
+foreach ($prot in @($vol.KeyProtector)) {{
+  $pass = [string]$prot.RecoveryPassword
+  if ($pass) {{
+    $id = ([string]$prot.KeyProtectorId).Trim('{{}}')
+    $rows.Add($id + ' ' + $pass)
+  }}
+}}
+if ($rows.Count -eq 0) {{
+  $kinds = @($vol.KeyProtector | ForEach-Object {{ [string]$_.KeyProtectorType }}) -join ', '
+  if (-not $kinds) {{ $kinds = 'none' }}
+  Save ('none:' + $kinds)
+}} else {{
+  Save ('found:' + ($rows -join "`n"))
+}}
+"#,
+            letter = letter
+        );
+        let saved = capture_ps(&body, true)?;
+        if let Some(kinds) = saved.strip_prefix("none:") {
+            let kinds = kinds.trim();
+            return Err(format!(
+                "Windows did not store a recovery password on {letter}:. Protectors on the drive: {kinds}. A TPM unlocks the drive when you sign in. It is not a key you can type. Use the list below for a Microsoft account, a school, work, Active Directory, or Intune."
+            ));
+        }
+        let found = saved.strip_prefix("found:").unwrap_or(saved.as_str()).trim();
+        if found.is_empty() {
+            return Err(format!("Windows did not show a recovery key for {letter}:."));
+        }
+        Ok(found.to_string())
+    })
+    .await
+    .map_err(|err| err.to_string())?
+}
+
+#[tauri::command]
 fn bitlocker_save_key(folder: String, drive: String, key: String) -> Result<String, String> {
     let letter = one_drive_letter(&drive)?;
-    let key = recovery_digits(&key)?;
+    let key = key.trim();
+    if key.is_empty() || key.chars().any(|ch| ch.is_control() && ch != '\n' && ch != '\r') || key.len() > 4000 {
+        return Err("Choose a recovery key to save".into());
+    }
+    let groups = recovery_groups(key)?;
     let folder = folder.trim();
     if folder.is_empty() || folder.chars().any(|ch| ch.is_control()) || folder.len() > 1024 {
         return Err("Choose a folder for the key document".into());
@@ -1915,8 +1984,9 @@ fn bitlocker_save_key(folder: String, drive: String, key: String) -> Result<Stri
         return Err(format!("Save the key somewhere other than {own}. That drive is the wrong place to keep the only copy."));
     }
     let path = Path::new(folder).join(format!("BitLocker Recovery Key {letter}.txt"));
+    let listed = groups.join("\r\n");
     let body = format!(
-        "Data Finder BitLocker recovery key\r\nDrive: {letter}:\r\n\r\nKeep this file off {letter}:.\r\nA locked drive does not open without this key, the password, or the key file.\r\n\r\n{key}\r\n"
+        "Data Finder BitLocker recovery key\r\nDrive: {letter}:\r\n\r\nKeep this file off {letter}:.\r\nA locked drive does not open without this key, the password, or the key file.\r\n\r\n{listed}\r\n"
     );
     fs::write(&path, body).map_err(|err| err.to_string())?;
     Ok(path.to_string_lossy().to_string())
@@ -2015,6 +2085,7 @@ pub fn run() {
             bitlocker_unlock,
             bitlocker_off,
             bitlocker_on,
+            bitlocker_read_key,
             bitlocker_save_key,
             choose_key_file
         ])

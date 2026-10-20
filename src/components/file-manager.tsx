@@ -73,7 +73,7 @@ import {
   type ViewMode,
 } from "@/lib/file-store";
 import { childrenOf, driveCaption, formatDate, formatSize, pathIds, resolvePath, typeLabel, type FsNode } from "@/lib/vfs";
-import { bitlockerOff, bitlockerOn, bitlockerSaveKey, bitlockerStatus, bitlockerUnlock, chooseFolder, chooseKeyFile, diskPath, earlierCopy, earlierEntries, earlierList, isDesktop, isDiskId, listSnapshots, mapNetwork, measurePath, mountVolume, openExternal, recoveryClear, recoverySave, recoveryStart, recoveryStatus, recoveryStop, removeSnapshot, restoreSetup, restoreSnapshot, restoreStatus, withoutDisk, type BitLockerDrive, type DiskSnapshot, type EarlierCopy, type EarlierEntry, type ExactSize, type RecoveryStatus, type RestoreStatus } from "@/lib/disk";
+import { bitlockerOff, bitlockerOn, bitlockerReadKey, bitlockerSaveKey, bitlockerStatus, bitlockerUnlock, chooseFolder, chooseKeyFile, diskPath, earlierCopy, earlierEntries, earlierList, isDesktop, isDiskId, listSnapshots, mapNetwork, measurePath, mountVolume, openExternal, recoveryClear, recoverySave, recoveryStart, recoveryStatus, recoveryStop, removeSnapshot, restoreSetup, restoreSnapshot, restoreStatus, withoutDisk, type BitLockerDrive, type DiskSnapshot, type EarlierCopy, type EarlierEntry, type ExactSize, type RecoveryStatus, type RestoreStatus } from "@/lib/disk";
 import { aboutInfo, manualSections } from "@/lib/manual";
 
 const UI_KEY = "data-finder-ui";
@@ -463,6 +463,7 @@ function TabRow() {
           </>
         )}
       </div>
+      <div className="flex min-w-0 flex-1 items-end overflow-x-auto">
       {tabs.map(([id, label]) => (
         <button
           key={id}
@@ -473,6 +474,7 @@ function TabRow() {
           {label}
         </button>
       ))}
+      </div>
       {reading && (
         <button type="button" className="mb-1 ml-auto shrink-0 px-2 text-xs text-tab-ink" onClick={() => useFiles.getState().setOptions({ reading: false })}>
           Exit reading
@@ -3066,8 +3068,131 @@ function stillEncrypted(drive: BitLockerDrive) {
 function DecryptionRibbon() {
   return (
     <div className="flex items-center px-3 py-2 text-sm text-muted">
-      Unlock a BitLocker drive with its key, decrypt one Windows already opened, or turn BitLocker on and save the key.
+      Unlock a drive with a key you already have, or follow the list for where that key is kept.
     </div>
+  );
+}
+
+type KeyPlace = "personal" | "school" | "work" | "ad" | "intune" | "gone";
+
+const KEY_PLACES: Array<{ id: KeyPlace; label: string; steps: string[]; links?: Array<{ label: string; href: string }> }> = [
+  {
+    id: "personal",
+    label: "Personal",
+    steps: [
+      "Sign in with the Microsoft account that was used on that PC. The recovery keys for that account are listed there. Match the Key ID from the blue screen. A key for a different drive will not work.",
+      "Look for a printed page, a USB stick, or a file named BitLocker Recovery Key. Check Documents, email, OneDrive, and any second drive.",
+      "If you can already open the drive, such as C: after you sign in, Read the key asks Windows for the recovery password it stored.",
+    ],
+    links: [{ label: "Microsoft account recovery keys", href: "https://account.microsoft.com/devices/recoverykey" }],
+  },
+  {
+    id: "school",
+    label: "School",
+    steps: [
+      "A school PC is managed by the school. The recovery key is held by school IT, not by a personal Microsoft account.",
+      "Contact the school help desk. Give them the computer name and the Key ID from the blue BitLocker screen.",
+      "If the school uses Microsoft 365 or Intune, only a school admin can open the key. A student account usually cannot.",
+      "Do not format the drive. The school can unlock it. Formatting erases the files and does not bring them back.",
+    ],
+  },
+  {
+    id: "work",
+    label: "Work",
+    steps: [
+      "Ask the company help desk, or the person who set up the PC. Give them the Key ID from the blue screen.",
+      "A work account does not list the key on the personal Microsoft account page. That page is only for a personal Microsoft account.",
+      "If you administer the company tenant, open the Entra admin center, then Devices, then that PC, then BitLocker keys. You can also search BitLocker keys by the Key ID.",
+      "If you can sign in and open the drive, Read the key asks Windows for the recovery password already on it.",
+    ],
+    links: [{ label: "Microsoft Entra admin center", href: "https://entra.microsoft.com" }],
+  },
+  {
+    id: "ad",
+    label: "Active Directory",
+    steps: [
+      "On a domain PC, Group Policy can store the recovery password on the computer object in Active Directory.",
+      "On a PC with the Active Directory tools, open Active Directory Users and Computers, find that computer, and open the BitLocker Recovery tab. Match the Key ID.",
+      "A domain admin can also read msFVE-RecoveryPassword from the recovery objects under that computer.",
+      "If that tab is empty, the domain never stored a key. Ask whoever turned BitLocker on. The TPM unlocks the drive at sign-in. It is not a key you can type on the blue screen.",
+    ],
+  },
+  {
+    id: "intune",
+    label: "Intune",
+    steps: [
+      "In the Intune admin center, open Devices, then the Windows device, then Recovery keys. The same key is often under that device in Entra ID.",
+      "Intune only has the key if the disk encryption policy saves recovery information to Entra ID.",
+      "A normal user does not see this page. An Intune admin does. Search by the Key ID from the blue screen.",
+      "Self-service is off unless an admin turned it on. If you are not the admin, the organization has to read the key for you.",
+    ],
+    links: [
+      { label: "Intune admin center", href: "https://intune.microsoft.com" },
+      { label: "Entra admin center", href: "https://entra.microsoft.com" },
+    ],
+  },
+  {
+    id: "gone",
+    label: "No key at all",
+    steps: [
+      "Write down the Key ID before you do anything else. That is how a key found later is matched to this drive.",
+      "Check each place once: the personal Microsoft account, a printed page, a USB stick, email, another PC on the same account, school or work help desk, Active Directory, and Intune.",
+      "If a copy of the files exists somewhere else, use that copy. OneDrive, a backup, a Keeps snapshot, or another computer is a copy. It is not inside the locked drive.",
+      "If the drive is locked and every key is gone, the files on it cannot be opened. Data Finder does not guess a missing key.",
+      "Formatting makes an empty drive. It does not recover the old files. Do not format if you still want those files.",
+    ],
+  },
+];
+
+function presentReadKeys(raw: string) {
+  return raw
+    .split(/\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const space = line.lastIndexOf(" ");
+      const pass = space >= 0 ? line.slice(space + 1) : line;
+      const id = space >= 0 ? line.slice(0, space).replace(/[{}]/g, "") : "";
+      const short = id.replace(/-/g, "").slice(0, 8).toUpperCase();
+      return short ? `Key ID ${short}\n${pass}` : pass;
+    })
+    .join("\n\n");
+}
+
+function KeyGuide() {
+  const [place, setPlace] = useState<KeyPlace>("personal");
+  const current = KEY_PLACES.find((item) => item.id === place) ?? KEY_PLACES[0];
+  return (
+    <section className="mt-6 max-w-3xl border border-line p-3">
+      <h3 className="text-sm font-semibold">Where to find the key</h3>
+      <p className="mt-1 text-sm text-muted">A recovery key is 48 digits. The blue BitLocker screen also shows a Key ID, eight characters. The key you use has to match that ID.</p>
+      <div className="mt-3 flex flex-wrap gap-2" role="tablist" aria-label="Where the key might be">
+        {KEY_PLACES.map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            role="tab"
+            aria-selected={place === item.id}
+            className={`min-h-11 border px-3 text-sm ${place === item.id ? "border-accent bg-accent text-accent-ink" : "border-line"}`}
+            onClick={() => setPlace(item.id)}
+          >
+            {item.label}
+          </button>
+        ))}
+      </div>
+      <ol className="mt-3 list-decimal space-y-2 pl-5 text-sm">
+        {current.steps.map((step) => <li key={step}>{step}</li>)}
+      </ol>
+      {current.links && (
+        <div className="mt-3 flex flex-wrap gap-3">
+          {current.links.map((link) => (
+            <button key={link.href} type="button" className="min-h-11 text-sm text-accent underline" onClick={() => void openExternal(link.href)}>
+              {link.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -3111,12 +3236,18 @@ function DecryptionPage() {
       .finally(() => setBusy(false));
   };
   if (!isDesktop()) {
-    return <div className="flex flex-1 items-center justify-center p-6 text-sm text-muted">Decryption runs in the Windows program, not in the browser copy.</div>;
+    return (
+      <div className="flex min-h-0 flex-1 flex-col overflow-auto p-4">
+        <h2 className="text-lg font-semibold">Decryption</h2>
+        <p className="mt-1 max-w-3xl text-sm text-muted">Unlock, decrypt, and turn BitLocker on run in the Windows program. The list below is where a recovery key is kept, and what is left when it cannot be found.</p>
+        <KeyGuide />
+      </div>
+    );
   }
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-auto p-4">
       <h2 className="text-lg font-semibold">Decryption</h2>
-      <p className="mt-1 max-w-3xl text-sm text-muted">A locked drive opens when you enter its recovery key, password, or key file. Data Finder does not guess that key. If Windows already unlocked the drive, Decrypt removes BitLocker and leaves the files in place. A drive that is not encrypted can be turned on, and the recovery key is shown so you can keep it in a document.</p>
+      <p className="mt-1 max-w-3xl text-sm text-muted">A locked drive opens when you enter its recovery key, password, or key file. Data Finder does not guess that key. If you do not have it, use Where to find the key. If Windows already unlocked the drive, Decrypt removes BitLocker and leaves the files in place.</p>
       {error && <p className="mt-3 text-sm text-danger">{error}</p>}
       {error && !asked && <button type="button" className="mt-2 min-h-11 self-start border border-line px-3 text-sm" onClick={() => { setAsked(true); load(true); }}>Give Windows permission</button>}
       <div className="mt-4 flex flex-wrap items-end gap-3">
@@ -3152,8 +3283,11 @@ function DecryptionPage() {
       )}
       {current && !locked && encrypted && (
         <div className="mt-4 max-w-xl">
-          <p className="text-sm">You can already open this drive. Decrypt takes BitLocker off. The files stay. It can take a long time, and Windows finishes it in the background.</p>
-          <button type="button" className="mt-3 min-h-11 bg-accent px-3 text-sm text-accent-ink disabled:opacity-40" disabled={busy} onClick={() => run(bitlockerOff(current.letter))}>Decrypt</button>
+          <p className="text-sm">You can already open this drive. Decrypt takes BitLocker off. The files stay. It can take a long time, and Windows finishes it in the background. Read the key shows a recovery password Windows already stored, when it stored one.</p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button type="button" className="min-h-11 bg-accent px-3 text-sm text-accent-ink disabled:opacity-40" disabled={busy} onClick={() => run(bitlockerOff(current.letter))}>Decrypt</button>
+            <button type="button" className="min-h-11 border border-line px-3 text-sm disabled:opacity-40" disabled={busy} onClick={() => run(bitlockerReadKey(current.letter), (next) => { setKey(presentReadKeys(next)); setKeyDrive(current.letter); setNote("This is the recovery key Windows already stored. Save it somewhere that is not this drive."); })}>Read the key</button>
+          </div>
         </div>
       )}
       {current && !locked && !encrypted && (
@@ -3165,11 +3299,12 @@ function DecryptionPage() {
       {key && (
         <div className="mt-4 max-w-xl border border-line p-3">
           <p className="text-sm font-semibold">Recovery key</p>
-          <input readOnly value={key} aria-label="Recovery key" className="mt-2 h-11 w-full border border-line bg-pane px-2 font-mono text-sm" />
+          <textarea readOnly value={key} aria-label="Recovery key" rows={Math.min(8, Math.max(2, key.split("\n").length))} className="mt-2 w-full border border-line bg-pane px-2 py-2 font-mono text-sm" />
           <button type="button" className="mt-3 min-h-11 border border-line px-3 text-sm" disabled={busy || !keyDrive} onClick={() => void chooseFolder().then((folder) => bitlockerSaveKey(folder, keyDrive, key)).then((path) => setNote(`Key saved · ${path}`)).catch((cause: unknown) => setNote(cause instanceof Error ? cause.message : "Could not save the key"))}>Save the key</button>
         </div>
       )}
       {note && <p className="mt-3 max-w-xl text-sm">{note}</p>}
+      <KeyGuide />
     </div>
   );
 }

@@ -39,6 +39,7 @@ commands.allow = [
   "bitlocker_unlock",
   "bitlocker_off",
   "bitlocker_on",
+  "bitlocker_read_key",
   "bitlocker_save_key",
   "choose_key_file",
 ]

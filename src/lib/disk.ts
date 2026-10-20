@@ -597,6 +597,10 @@ export async function bitlockerOn(drive: string): Promise<string> {
   return invoke<string>("bitlocker_on", { drive });
 }
 
+export async function bitlockerReadKey(drive: string): Promise<string> {
+  return invoke<string>("bitlocker_read_key", { drive });
+}
+
 export async function bitlockerSaveKey(folder: string, drive: string, key: string): Promise<string> {
   return invoke<string>("bitlocker_save_key", { folder, drive, key });
 }
