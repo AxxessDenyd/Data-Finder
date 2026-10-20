@@ -13,15 +13,15 @@ The same guide is inside the program. Open the Help tab, then Manual. Search the
 
 ## The window
 
-The program opens in one pane. The folder tree is on the left and the file list is on the right. The tabs are Home, Find, Recovery, and Help.
+The program opens in one pane. The folder tree is on the left and the file list is on the right. The tabs are Home, Find, Recovery, Keeps, and Help.
 
-Home is one bar: New, Go, Drives, Filter, Tools, and Settings, then Cut, Copy, Paste, Rename, Delete, Sort, and View, then Two panes. The tabs are Home, Find, Recovery, and Help. The menu button holds Second pane, Dark mode, Help, and About.
+Home is one bar: New, Go, Drives, Filter, Tools, and Settings, then Cut, Copy, Paste, Rename, Delete, Sort, and View, then Two panes. The tabs are Home, Find, Recovery, Keeps, and Help. The menu button holds Dark mode, Help, and About.
 
 Double-click a file to open it in the program Windows already uses for that file. Folder sizes are the full measured size. Recent, in the folder tree, folds open and closed.
 
 The newest installer and portable program are the Latest release on GitHub.
 
-The search box sits on the Home, Find, Recovery, and Help bar, at the right. Refresh sits next to the path. Check boxes sit beside each name and can select more than one file or folder at a time. Pinned and Recent are at the top of the folder tree, and each can be folded. Pinned starts open. Folding it in one pane leaves the other pane as it was. The star on a folder pins or unpins it, and the X unpins a folder from the list. Desktop, Documents, Downloads, Pictures, Music, and Videos start pinned.
+The search box sits on the Home, Find, Recovery, Keeps, and Help bar, at the right. Refresh sits next to the path. Check boxes sit beside each name and can select more than one file or folder at a time. Pinned and Recent are at the top of the folder tree, and each can be folded. Pinned starts open. Folding it in one pane leaves the other pane as it was. The star on a folder pins or unpins it, and the X unpins a folder from the list. Desktop, Documents, Downloads, Pictures, Music, and Videos start pinned.
 
 Refresh reads the open folder again and measures every folder size. On This computer, Refresh and clicking This computer update each drive's used space without opening the drive.
 
@@ -33,7 +33,7 @@ Info measures the selected file or folder and shows the exact size in bytes. Rec
 
 Drives you can see are mounted. Show every drive, in the Drives menu, lists the rest. That menu also mounts a drive that is waiting for a letter, maps a network drive, adds a network location, and disconnects a network drive.
 
-A snapshot asks where to save the copy. Leave the folder blank to keep it on this PC, or choose a folder on an external drive. The Snapshots window lists each copy. User folders can copy Desktop, Documents, Downloads, Pictures, Music, and Videos, and it asks where to save them because that can use a lot of space. Earlier copies is separate: it reads restore points Windows already saved and copies files out of them. It is not a snapshot.
+A snapshot asks where to save the copy. Leave the folder blank to keep it on this PC, or choose a folder on an external drive. Keeps, the tab between Recovery and Help, lists each saved copy. User folders can copy Desktop, Documents, Downloads, Pictures, Music, and Videos, and it asks where to save them because that can use a lot of space. Earlier copies is on the same Keeps tab. It reads restore points Windows already saved and copies files out of them. It is not a snapshot.
 
 About links open in the browser.
 
@@ -53,7 +53,7 @@ Select several files and folders, then open Details. Each item is listed with it
 - **Go:** Up, This computer, Refresh, and Jump to path.
 - **Drives:** show every drive, mount a waiting drive, map a network drive, add a network location, and disconnect.
 - **Filter:** sort order, file kind, and how recently an item changed.
-- **Tools:** snapshots, earlier copies, disk use, copy list, the queue, and activity.
+- **Tools:** Keeps, disk use, copy list, the queue, and activity.
 - **Settings:** dark mode, larger text, folder measuring, unmount, and format.
 - **Cut, Copy, Paste, Rename, Delete:** act on the selection.
 - **Sort and View:** sort the folder, and change icons, details, check boxes, and the Show list.
@@ -89,7 +89,7 @@ Folder sizes are measured for the folders in view. A plus sign means the size is
 
 ## Find and Analyze
 
-Find narrows the open folder. Save snapshot asks where to store the copy of the open folder, including an external drive. Bring back restores those files.
+Find narrows the open folder. Save snapshot asks where to store the copy of the open folder, including an external drive. Keeps lists those copies, and earlier copies Windows already saved. Bring back restores a saved copy.
 
 ## Keys
 

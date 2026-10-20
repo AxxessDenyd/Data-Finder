@@ -441,6 +441,7 @@ function TabRow() {
     ["home", "Home"],
     ["inspect", "Find"],
     ["recovery", "Recovery"],
+    ["keeps", "Keeps"],
     ["resources", "Help"],
   ];
   const go = (id: RibbonTab) => useFiles.getState().setTab(id);
@@ -454,7 +455,6 @@ function TabRow() {
           <>
             <button type="button" aria-label="Close menu" className="fixed inset-0 z-20 cursor-default" onClick={() => setMenu(false)} />
             <div className="absolute top-full left-0 z-30 min-w-56 border border-line bg-pane py-1 shadow-md">
-              <button type="button" className="block min-h-11 w-full px-3 text-left text-sm hover:bg-select" onClick={() => { const state = useFiles.getState(); if (!state.split) state.toggleSplit(); else useFiles.setState({ status: "The second pane is already open" }); setMenu(false); }}>Second pane</button>
               <button type="button" className="block min-h-11 w-full px-3 text-left text-sm hover:bg-select" onClick={() => { useFiles.getState().setOptions({ dark: !dark }); setMenu(false); }}>{dark ? "Light mode" : "Dark mode"}</button>
               <button type="button" className="block min-h-11 w-full px-3 text-left text-sm hover:bg-select" onClick={() => { go("resources"); setMenu(false); }}>Help</button>
               <button type="button" className="block min-h-11 w-full px-3 text-left text-sm hover:bg-select" onClick={() => { const state = useFiles.getState(); state.setTab("resources"); state.setHelpPage("about"); setMenu(false); }}>About</button>
@@ -491,6 +491,7 @@ function Ribbon() {
       {tab === "home" && <HomeRibbon />}
       {tab === "inspect" && <InspectRibbon />}
       {tab === "recovery" && <RecoveryRibbon />}
+      {tab === "keeps" && <KeepsRibbon />}
       {tab === "tools" && <ToolsRibbon />}
       {tab === "options" && <OptionsRibbon />}
       {tab === "resources" && <ResourcesRibbon />}
@@ -652,9 +653,7 @@ function HomeRibbon() {
       <FilterMenu />
       <SectionMenu label="Tools">
         <MenuAction label="Save snapshot" icon={<History className="size-4" />} onClick={() => store().takeSnapshot()} />
-        <MenuAction label="Snapshots" icon={<History className="size-4" />} onClick={() => store().openDialog({ kind: "snaps" })} />
-        <MenuAction label="User folders" icon={<Folder className="size-4" />} onClick={() => store().openDialog({ kind: "snap-user" })} />
-        <MenuAction label="Earlier copies" icon={<RotateCcw className="size-4" />} onClick={() => store().openDialog({ kind: "earlier" })} />
+        <MenuAction label="Keeps" icon={<History className="size-4" />} onClick={() => store().setTab("keeps")} />
         <div className="my-1 h-px bg-line" />
         <MenuAction label="Disk use" icon={<HardDrive className="size-4" />} onClick={() => openSpaceReport()} />
         <MenuAction label="Copy list" icon={<FileText className="size-4" />} onClick={() => void copyListing()} />
@@ -805,7 +804,7 @@ function ToolsRibbon() {
       </GroupBox>
       <GroupBox title="Snapshots">
         <RibbonButton label="Save snapshot" icon={<History className="size-4" />} onClick={() => useFiles.getState().takeSnapshot()} />
-        <RibbonButton label="Snapshots" icon={<History className="size-4" />} onClick={() => useFiles.getState().openDialog({ kind: "snaps" })} />
+        <RibbonButton label="Keeps" icon={<History className="size-4" />} onClick={() => useFiles.getState().setTab("keeps")} />
         <RibbonButton label="User folders" icon={<Folder className="size-4" />} onClick={() => useFiles.getState().openDialog({ kind: "snap-user" })} />
         {shadows.map((item) => (
           <RibbonButton key={item.id} label={`${labels[item.folderId] ?? "Folder"} · ${new Date(item.taken).toLocaleDateString()}`} icon={<History className="size-4" />} active={shadowId === item.id} onClick={() => useFiles.getState().openShadow(active, item.id)} />
@@ -2150,27 +2149,28 @@ function NetworkDialog({ location }: { location: boolean }) {
   );
 }
 
-function SnapshotWindow() {
+function SnapshotWindow({ embedded = false }: { embedded?: boolean }) {
   const [rows, setRows] = useState<DiskSnapshot[]>([]);
   const [picked, setPicked] = useState<string | null>(null);
+  const status = useFiles((s) => s.status);
   const load = () => {
     void listSnapshots().then((items) => {
       setRows(items);
       setPicked((current) => current && items.some((item) => item.id === current) ? current : items[0]?.id ?? null);
     }).catch(() => setRows([]));
   };
-  useEffect(load, []);
+  useEffect(load, [status]);
   const current = rows.find((item) => item.id === picked);
   return (
-    <div className="w-[42rem] max-w-[90vw]">
+    <div className={embedded ? "" : "w-[42rem] max-w-[90vw]"}>
       <div className="flex items-center justify-between gap-2">
-        <h2 className="text-base font-semibold">Snapshots</h2>
-        <button type="button" aria-label="Close" onClick={() => useFiles.getState().openDialog(null)}><X className="size-4" /></button>
+        <h2 className="text-base font-semibold">Saved copies</h2>
+        {!embedded && <button type="button" aria-label="Close" onClick={() => useFiles.getState().openDialog(null)}><X className="size-4" /></button>}
       </div>
-      <p className="mt-1 text-sm text-muted">A snapshot copies the files so they can be put back if something is deleted. You choose the folder when you save, including a folder on an external drive.</p>
+      <p className="mt-1 text-sm text-muted">A saved copy is the folder as it is right now, stored where you choose. That can be an external drive.</p>
       <div className="mt-3 grid gap-3 sm:grid-cols-[16rem_1fr]">
-        <ul className="max-h-72 overflow-auto border border-line">
-          {rows.length === 0 && <li className="px-2 py-3 text-sm text-muted">No snapshots yet</li>}
+        <ul className={"overflow-auto border border-line " + (embedded ? "max-h-[50vh]" : "max-h-72")}>
+          {rows.length === 0 && <li className="px-2 py-3 text-sm text-muted">No saved copies yet</li>}
           {rows.map((item) => (
             <li key={item.id}>
               <button type="button" className={"block w-full px-2 py-2 text-left text-sm " + (item.id === picked ? "bg-select" : "hover:bg-header")} onClick={() => setPicked(item.id)}>
@@ -2181,7 +2181,7 @@ function SnapshotWindow() {
           ))}
         </ul>
         <div className="text-sm">
-          {!current && <p className="text-muted">Save a snapshot from the folder you have open, or copy your user folders.</p>}
+          {!current && <p className="text-muted">Save the folder you have open, or copy your user folders.</p>}
           {current && (
             <>
               <p>{current.files} files · {formatSize(current.bytes)}{current.skipped ? ` · ${current.skipped} skipped` : ""}</p>
@@ -2200,7 +2200,7 @@ function SnapshotWindow() {
   );
 }
 
-function EarlierDialog() {
+function EarlierDialog({ embedded = false }: { embedded?: boolean }) {
   const [rows, setRows] = useState<EarlierCopy[] | null>(null);
   const [error, setError] = useState("");
   const [picked, setPicked] = useState<EarlierCopy | null>(null);
@@ -2247,7 +2247,7 @@ function EarlierDialog() {
     <div>
       <div className="flex items-center justify-between gap-2">
         <h2 className="text-base font-semibold">Earlier copies</h2>
-        <button type="button" aria-label="Close" onClick={() => useFiles.getState().openDialog(null)}><X className="size-4" /></button>
+        {!embedded && <button type="button" aria-label="Close" onClick={() => useFiles.getState().openDialog(null)}><X className="size-4" /></button>}
       </div>
       <p className="mt-1 text-sm text-muted">A snapshot copies a folder as it is right now. Earlier copies are restore points Windows already saved. Copy files out of one. The restore point is not changed.</p>
       {error && <p className="mt-2 text-sm text-danger">{error}</p>}
@@ -2843,7 +2843,7 @@ function ContextMenu() {
         {node?.kind === "drive" && !node.system && node.mounted !== false && node.name.endsWith(":") && item("Format", () => state.openDialog({ kind: "format", id: node.id }), <Trash2 className="size-4" />)}
         {item("Refresh", () => state.refresh(), <RefreshCw className="size-4" />)}
         {item("Save snapshot", () => state.takeSnapshot(), <History className="size-4" />)}
-        {item("Snapshots", () => state.openDialog({ kind: "snaps" }), <History className="size-4" />)}
+        {item("Keeps", () => state.setTab("keeps"), <History className="size-4" />)}
       </div>
     </>
   );
@@ -3002,6 +3002,29 @@ function RecoveryRibbon() {
   return (
     <div className="flex items-center px-3 py-2 text-sm text-muted">
       Recovery copies deleted files into a folder you choose. The drive you scan is not changed.
+    </div>
+  );
+}
+
+function KeepsRibbon() {
+  return (
+    <div className="flex flex-wrap items-center gap-2 px-3 py-2 text-sm">
+      <span className="text-muted">A saved copy is the folder as it is now. An earlier copy is a restore point Windows already kept.</span>
+      <button type="button" className="h-9 rounded-md bg-accent px-3 text-accent-ink" onClick={() => useFiles.getState().takeSnapshot()}>Save this folder</button>
+      <button type="button" className="h-9 rounded-md border border-line px-3" onClick={() => useFiles.getState().openDialog({ kind: "snap-user" })}>User folders</button>
+    </div>
+  );
+}
+
+function KeepsPage() {
+  return (
+    <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden lg:grid-cols-2">
+      <section className="min-h-0 overflow-auto border-b border-line p-4 lg:border-b-0 lg:border-r">
+        <SnapshotWindow embedded />
+      </section>
+      <section className="min-h-0 overflow-auto p-4">
+        <EarlierDialog embedded />
+      </section>
     </div>
   );
 }
@@ -3335,6 +3358,8 @@ export function FileManager() {
           helpPage === "about" ? <AboutPage /> : <ManualPage />
         ) : tab === "recovery" ? (
           <RecoveryPage />
+        ) : tab === "keeps" ? (
+          <KeepsPage />
         ) : split ? (
           <Group orientation="vertical" className="min-h-0 flex-1">
             <Panel minSize="20%" id="pane-a" className="min-h-0">

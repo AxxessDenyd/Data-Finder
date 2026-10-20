@@ -72,7 +72,7 @@ export function columnsFrom(saved: Partial<ColumnWidths> | undefined, current: C
 }
 
 export type SortKey = "name" | "size" | "type" | "date";
-export type RibbonTab = "home" | "inspect" | "tools" | "options" | "resources" | "recovery";
+export type RibbonTab = "home" | "inspect" | "tools" | "options" | "resources" | "recovery" | "keeps";
 export type BarMode = "linear" | "log";
 export type FindColumn = "name" | "size" | "type" | "date";
 export type DateFormat = "mdy" | "ymd" | "dmy";
@@ -915,7 +915,7 @@ export const useFiles = create<FileState & Actions>((set, get) => ({
     set({ status: "Copying user folders into a snapshot. This can take a while.", dialog: null });
     try {
       const info = await saveSnapshot(folders, folder);
-      set({ status: `User snapshot saved · ${info.files} file(s) · ${formatSize(info.bytes)}`, dialog: { kind: "snaps" } });
+      set({ status: `User snapshot saved · ${info.files} file(s) · ${formatSize(info.bytes)}`, dialog: null, tab: "keeps" });
     } catch (error) {
       set({ status: error instanceof Error ? error.message : "Could not save that snapshot" });
     }
@@ -1949,7 +1949,7 @@ export const useFiles = create<FileState & Actions>((set, get) => ({
       set({ status: `Copying ${node.name} into a snapshot`, dialog: null });
       try {
         const info = await saveSnapshot([source], folder);
-        set({ status: `Snapshot saved · ${info.files} file(s) · ${formatSize(info.bytes)}`, dialog: { kind: "snaps" } });
+        set({ status: `Snapshot saved · ${info.files} file(s) · ${formatSize(info.bytes)}`, dialog: null, tab: "keeps" });
       } catch (error) {
         set({ status: error instanceof Error ? error.message : "Could not save that snapshot" });
       }
@@ -1978,7 +1978,8 @@ export const useFiles = create<FileState & Actions>((set, get) => ({
     };
     set({
       snaps: [...state.snaps, snap].slice(-40),
-      dialog: { kind: "snaps" },
+      dialog: null,
+      tab: "keeps",
       status: `Snapshot saved · ${files.length} item(s)`,
       log: [...state.log, logLine(`Snapshot saved · ${snap.path}`)],
     });
