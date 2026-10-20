@@ -35,6 +35,8 @@ jobs:
           $portable = Get-ChildItem -Path "src-tauri/target/release" -Filter "*.exe" | Where-Object { $_.Name -notlike "*setup*" } | Select-Object -First 1
           if (-not $portable) { throw "Program was not created" }
           Copy-Item $portable.FullName "$PWD/windows-out/Data Finder.exe"
+          Copy-Item "$PWD/windows-out/Data Finder Setup.exe" "$PWD/windows-out/Data-Finder-Setup.exe"
+          Copy-Item "$PWD/windows-out/Data Finder.exe" "$PWD/windows-out/Data-Finder.exe"
       - uses: actions/upload-artifact@v4
         with:
           name: Data-Finder-Windows
@@ -47,8 +49,8 @@ jobs:
         run: |
           gh release delete latest --yes --cleanup-tag 2>$null
           gh release create latest `
-            "windows-out/Data Finder Setup.exe#Data-Finder-Setup.exe" `
-            "windows-out/Data Finder.exe#Data-Finder.exe" `
+            "windows-out/Data-Finder-Setup.exe" `
+            "windows-out/Data-Finder.exe" `
             --title "Latest" `
             --notes "The current Data Finder installer and portable program." `
             --latest
