@@ -418,6 +418,10 @@ export async function openExternal(url: string): Promise<void> {
   await invoke("open_url", { url });
 }
 
+export async function chooseFolder(): Promise<string> {
+  return invoke<string>("choose_folder");
+}
+
 export async function knownFolders(): Promise<KnownFolder[]> {
   if (!isDesktop()) return [];
   return invoke<KnownFolder[]>("known_folders");
@@ -431,8 +435,8 @@ export async function mapNetwork(unc: string, letter: string): Promise<string> {
   return invoke<string>("map_network", { unc, letter });
 }
 
-export async function saveSnapshot(sources: string[]): Promise<DiskSnapshot> {
-  return invoke<DiskSnapshot>("snapshot_save", { sources });
+export async function saveSnapshot(sources: string[], folder = ""): Promise<DiskSnapshot> {
+  return invoke<DiskSnapshot>("snapshot_save", { sources, folder });
 }
 
 export async function listSnapshots(): Promise<DiskSnapshot[]> {

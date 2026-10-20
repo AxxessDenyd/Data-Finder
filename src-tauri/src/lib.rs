@@ -873,6 +873,49 @@ fn snap_root() -> PathBuf {
     PathBuf::from(base).join("Data Finder").join("Snapshots")
 }
 
+fn locations_file() -> PathBuf {
+    snap_root().join("locations.json")
+}
+
+fn read_locations() -> Vec<String> {
+    let Ok(text) = fs::read_to_string(locations_file()) else {
+        return Vec::new();
+    };
+    serde_json::from_str(&text).unwrap_or_default()
+}
+
+fn remember_location(dir: &Path) {
+    let mut paths = read_locations();
+    let text = dir.to_string_lossy().to_string();
+    if paths.iter().any(|item| item.eq_ignore_ascii_case(&text)) {
+        return;
+    }
+    paths.push(text);
+    let _ = fs::create_dir_all(snap_root());
+    if let Ok(body) = serde_json::to_string_pretty(&paths) {
+        let _ = fs::write(locations_file(), body);
+    }
+}
+
+fn read_snap(dir: &Path) -> Option<SnapInfo> {
+    let text = fs::read_to_string(dir.join("manifest.json")).ok()?;
+    serde_json::from_str(&text).ok()
+}
+
+fn find_snapshot(id: &str) -> Option<PathBuf> {
+    let direct = snap_root().join(id);
+    if read_snap(&direct).is_some() {
+        return Some(direct);
+    }
+    for path in read_locations() {
+        let dir = PathBuf::from(path);
+        if read_snap(&dir).is_some_and(|info| info.id == id) {
+            return Some(dir);
+        }
+    }
+    None
+}
+
 fn copy_tree(from: &Path, to: &Path, files: &mut u64, bytes: &mut u64, skipped: &mut u64, depth: u32) {
     if depth > 40 {
         *skipped += 1;
@@ -914,13 +957,18 @@ fn copy_tree(from: &Path, to: &Path, files: &mut u64, bytes: &mut u64, skipped: 
 }
 
 #[tauri::command]
-async fn snapshot_save(sources: Vec<String>) -> Result<SnapInfo, String> {
+async fn snapshot_save(sources: Vec<String>, folder: String) -> Result<SnapInfo, String> {
     tauri::async_runtime::spawn_blocking(move || {
         if sources.is_empty() {
             return Err("Choose a folder to snapshot".into());
         }
         let id = format!("{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0));
-        let root = snap_root().join(&id);
+        let parent = {
+            let trimmed = folder.trim();
+            if trimmed.is_empty() { snap_root() } else { PathBuf::from(trimmed) }
+        };
+        fs::create_dir_all(&parent).map_err(|err| err.to_string())?;
+        let root = parent.join(&id);
         let store = root.join("files");
         fs::create_dir_all(&store).map_err(|err| err.to_string())?;
         let mut files = 0u64;
@@ -952,6 +1000,7 @@ async fn snapshot_save(sources: Vec<String>) -> Result<SnapInfo, String> {
             skipped,
         };
         fs::write(root.join("manifest.json"), serde_json::to_string_pretty(&info).map_err(|err| err.to_string())?).map_err(|err| err.to_string())?;
+        remember_location(&root);
         Ok(info)
     })
     .await
@@ -960,19 +1009,23 @@ async fn snapshot_save(sources: Vec<String>) -> Result<SnapInfo, String> {
 
 #[tauri::command]
 fn snapshot_list() -> Vec<SnapInfo> {
-    let root = snap_root();
-    let Ok(entries) = fs::read_dir(&root) else {
-        return Vec::new();
-    };
     let mut out = Vec::new();
-    for entry in entries.flatten() {
-        let manifest = entry.path().join("manifest.json");
-        let Ok(text) = fs::read_to_string(manifest) else {
-            continue;
-        };
-        if let Ok(info) = serde_json::from_str::<SnapInfo>(&text) {
+    let mut seen = std::collections::HashSet::new();
+    let mut consider = |dir: PathBuf| {
+        let Some(info) = read_snap(&dir) else { return };
+        if seen.insert(info.id.clone()) {
             out.push(info);
         }
+    };
+    if let Ok(entries) = fs::read_dir(snap_root()) {
+        for entry in entries.flatten() {
+            if entry.path().is_dir() {
+                consider(entry.path());
+            }
+        }
+    }
+    for path in read_locations() {
+        consider(PathBuf::from(path));
     }
     out.sort_by(|a, b| b.taken.cmp(&a.taken));
     out
@@ -981,7 +1034,7 @@ fn snapshot_list() -> Vec<SnapInfo> {
 #[tauri::command]
 async fn snapshot_restore(id: String) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let root = snap_root().join(&id);
+        let root = find_snapshot(&id).ok_or_else(|| "That snapshot was not found".to_string())?;
         let text = fs::read_to_string(root.join("manifest.json")).map_err(|_| "That snapshot was not found".to_string())?;
         let info: SnapInfo = serde_json::from_str(&text).map_err(|err| err.to_string())?;
         let mut restored = 0u64;
@@ -1003,11 +1056,17 @@ async fn snapshot_restore(id: String) -> Result<String, String> {
 
 #[tauri::command]
 fn snapshot_remove(id: String) -> Result<(), String> {
-    let root = snap_root().join(&id);
-    if !root.starts_with(snap_root()) {
+    let root = find_snapshot(&id).ok_or_else(|| "That snapshot was not found".to_string())?;
+    let allowed = root.starts_with(snap_root()) || read_locations().iter().any(|path| PathBuf::from(path) == root);
+    if !allowed {
         return Err("That snapshot cannot be removed".into());
     }
-    fs::remove_dir_all(root).map_err(|err| err.to_string())
+    fs::remove_dir_all(&root).map_err(|err| err.to_string())?;
+    let left: Vec<String> = read_locations().into_iter().filter(|path| PathBuf::from(path) != root).collect();
+    if let Ok(body) = serde_json::to_string_pretty(&left) {
+        let _ = fs::write(locations_file(), body);
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -1196,6 +1255,32 @@ fn open_path(path: String) -> Result<(), String> {
     }
 }
 
+#[tauri::command]
+fn choose_folder() -> Result<String, String> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        let script = "Add-Type -AssemblyName System.Windows.Forms; $owner = New-Object System.Windows.Forms.Form; $owner.TopMost = $true; $owner.ShowInTaskbar = $false; $owner.Opacity = 0; $owner.Show(); $owner.Activate(); $dialog = New-Object System.Windows.Forms.FolderBrowserDialog; $dialog.Description = 'Choose a folder'; $dialog.ShowNewFolderButton = $true; $result = $dialog.ShowDialog($owner); $owner.Close(); if ($result -eq [System.Windows.Forms.DialogResult]::OK) { [Console]::Out.Write($dialog.SelectedPath) }";
+        let output = Command::new("powershell")
+            .args(["-NoProfile", "-STA", "-Command", script])
+            .creation_flags(0x08000000)
+            .output()
+            .map_err(|err| err.to_string())?;
+        if !output.status.success() {
+            return Err("Could not open the folder window".into());
+        }
+        let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if path.is_empty() {
+            return Err("No folder was chosen".into());
+        }
+        Ok(path)
+    }
+    #[cfg(not(windows))]
+    {
+        Err("Choosing a folder works in the Windows program".into())
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -1225,7 +1310,8 @@ pub fn run() {
             snapshot_list,
             snapshot_restore,
             snapshot_remove,
-            open_path
+            open_path,
+            choose_folder
         ])
         .run(tauri::generate_context!())
         .expect("Data Finder failed to start");

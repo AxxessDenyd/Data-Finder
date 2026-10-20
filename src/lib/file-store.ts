@@ -102,7 +102,8 @@ export type DialogState =
   | { kind: "format"; id: string }
   | { kind: "network"; location: boolean }
   | { kind: "snaps" }
-  | { kind: "snap-user" };
+  | { kind: "snap-user" }
+  | { kind: "snap-dest" };
 
 export interface SearchRequest {
   query?: string;
@@ -269,6 +270,7 @@ interface FileState extends FsSnapshot {
   helpQuery: string;
   showAllDrives: boolean;
   pins: string[];
+  pinsOpen: boolean;
   recentPaths: string[];
   quickPlaces: KnownFolder[];
   readerId: string | null;
@@ -364,6 +366,7 @@ export interface UiPrefs {
   previewOpen?: boolean;
   snaps?: Array<ShadowCopy & { path: string }>;
   pins?: string[];
+  pinsOpen?: boolean;
   recentPaths?: string[];
   showAllDrives?: boolean;
   uiRev?: number;
@@ -382,9 +385,10 @@ interface Actions {
   setHelpPage: (page: "manual" | "about") => void;
   setHelpQuery: (query: string) => void;
   setShowAllDrives: (on: boolean) => void;
+  setPinsOpen: (open: boolean) => void;
   rememberPath: (path: string) => void;
   reloadDrives: () => Promise<void>;
-  saveUserSnapshot: () => Promise<void>;
+  saveUserSnapshot: (folder?: string) => Promise<void>;
   toggleSplit: () => void;
   toggleDiff: () => void;
   toggleDupes: () => void;
@@ -439,6 +443,7 @@ interface Actions {
   clearShadow: () => void;
   restoreShadow: (shadowId?: string) => void;
   takeSnapshot: () => void;
+  saveSnapshotTo: (folder: string) => Promise<void>;
   mirror: () => void;
   syncOther: () => void;
   toggleFlat: (index?: 0 | 1) => void;
@@ -775,6 +780,7 @@ export const useFiles = create<FileState & Actions>((set, get) => ({
   helpQuery: "",
   showAllDrives: false,
   pins: [],
+  pinsOpen: true,
   recentPaths: [],
   quickPlaces: [],
   snaps: [],
@@ -785,6 +791,7 @@ export const useFiles = create<FileState & Actions>((set, get) => ({
   setHelpPage: (helpPage) => set({ helpPage }),
   setHelpQuery: (helpQuery) => set({ helpQuery, helpPage: "manual" }),
   setShowAllDrives: (showAllDrives) => set({ showAllDrives, status: showAllDrives ? "Showing every drive" : "Showing mounted drives" }),
+  setPinsOpen: (pinsOpen) => set({ pinsOpen }),
   rememberPath: (path) =>
     set((state) => ({
       recentPaths: [path, ...state.recentPaths.filter((item) => item.toLowerCase() !== path.toLowerCase())].slice(0, 12),
@@ -796,7 +803,7 @@ export const useFiles = create<FileState & Actions>((set, get) => ({
       set({ status: error instanceof Error ? error.message : "Could not refresh drives" });
     }
   },
-  saveUserSnapshot: async () => {
+  saveUserSnapshot: async (folder = "") => {
     const folders = get().pins.length ? get().pins : (await knownFolders()).map((folder) => folder.path);
     if (!folders.length) {
       set({ status: "No user folders were found", dialog: null });
@@ -804,7 +811,7 @@ export const useFiles = create<FileState & Actions>((set, get) => ({
     }
     set({ status: "Copying user folders into a snapshot. This can take a while.", dialog: null });
     try {
-      const info = await saveSnapshot(folders);
+      const info = await saveSnapshot(folders, folder);
       set({ status: `User snapshot saved · ${info.files} file(s) · ${formatSize(info.bytes)}`, dialog: { kind: "snaps" } });
     } catch (error) {
       set({ status: error instanceof Error ? error.message : "Could not save that snapshot" });
@@ -1840,18 +1847,30 @@ export const useFiles = create<FileState & Actions>((set, get) => ({
       set({ status: "Open a folder, then save a snapshot" });
       return;
     }
+    set({ dialog: { kind: "snap-dest" }, menu: null });
+  },
+
+  saveSnapshotTo: async (folder) => {
+    const state = get();
+    const folderId = state.panes[state.active].pathId;
+    const node = state.nodes[folderId];
+    if (!node || node.kind === "file" || node.kind === "computer") {
+      set({ status: "Open a folder, then save a snapshot", dialog: null });
+      return;
+    }
     const source = diskPath(folderId);
     if (source && isDesktop()) {
-      set({ status: `Copying ${node.name} into a snapshot` });
-      void saveSnapshot([source])
-        .then((info) => {
-          set({ status: `Snapshot saved · ${info.files} file(s) · ${formatSize(info.bytes)}`, dialog: { kind: "snaps" } });
-        })
-        .catch((error: unknown) => set({ status: error instanceof Error ? error.message : "Could not save that snapshot" }));
+      set({ status: `Copying ${node.name} into a snapshot`, dialog: null });
+      try {
+        const info = await saveSnapshot([source], folder);
+        set({ status: `Snapshot saved · ${info.files} file(s) · ${formatSize(info.bytes)}`, dialog: { kind: "snaps" } });
+      } catch (error) {
+        set({ status: error instanceof Error ? error.message : "Could not save that snapshot" });
+      }
       return;
     }
     if (!state.order[folderId]) {
-      set({ status: "Open the folder so its contents can be saved" });
+      set({ status: "Open the folder so its contents can be saved", dialog: null });
       return;
     }
     const files = (state.order[folderId] ?? [])
@@ -1873,6 +1892,7 @@ export const useFiles = create<FileState & Actions>((set, get) => ({
     };
     set({
       snaps: [...state.snaps, snap].slice(-40),
+      dialog: { kind: "snaps" },
       status: `Snapshot saved · ${files.length} item(s)`,
       log: [...state.log, logLine(`Snapshot saved · ${snap.path}`)],
     });
@@ -2361,6 +2381,7 @@ export const useFiles = create<FileState & Actions>((set, get) => ({
         previewOpen: prefs.previewOpen ?? state.previewOpen,
         snaps: prefs.snaps ?? state.snaps,
         pins: prefs.pins ?? state.pins,
+        pinsOpen: prefs.pinsOpen ?? true,
         recentPaths: prefs.recentPaths ?? state.recentPaths,
         showAllDrives: prefs.showAllDrives ?? false,
         uiRev: 4,

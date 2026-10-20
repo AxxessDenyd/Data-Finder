@@ -73,7 +73,7 @@ import {
   type ViewMode,
 } from "@/lib/file-store";
 import { childrenOf, driveCaption, formatDate, formatSize, pathIds, resolvePath, typeLabel, type FsNode } from "@/lib/vfs";
-import { diskPath, isDesktop, isDiskId, listSnapshots, mapNetwork, measurePath, mountVolume, openExternal, recoverySave, recoveryStart, recoveryStatus, recoveryStop, removeSnapshot, restoreSnapshot, withoutDisk, type DiskSnapshot, type ExactSize, type RecoveryStatus } from "@/lib/disk";
+import { chooseFolder, diskPath, isDesktop, isDiskId, listSnapshots, mapNetwork, measurePath, mountVolume, openExternal, recoverySave, recoveryStart, recoveryStatus, recoveryStop, removeSnapshot, restoreSnapshot, withoutDisk, type DiskSnapshot, type ExactSize, type RecoveryStatus } from "@/lib/disk";
 import { aboutInfo, manualSections } from "@/lib/manual";
 
 const UI_KEY = "data-finder-ui";
@@ -489,7 +489,6 @@ function Ribbon() {
   return (
     <div className="shrink-0 border-b border-ribbon-edge bg-ribbon">
       {tab === "home" && <HomeRibbon />}
-      {tab === "home" && <ActionRibbon />}
       {tab === "inspect" && <InspectRibbon />}
       {tab === "recovery" && <RecoveryRibbon />}
       {tab === "tools" && <ToolsRibbon />}
@@ -566,27 +565,6 @@ function SortMenu() {
   );
 }
 
-function ActionRibbon() {
-  const active = useFiles((s) => s.active);
-  const selected = useFiles((s) => s.panes[s.active].selected);
-  const nodes = useFiles((s) => s.nodes);
-  const store = useFiles.getState;
-  return (
-    <div className="flex flex-wrap items-center gap-1 border-t border-ribbon-edge px-2 py-1">
-      <RibbonButton label="Cut" disabled={!selected.length} icon={<Scissors className="size-4" />} onClick={() => store().cut()} />
-      <RibbonButton label="Copy" disabled={!selected.length} icon={<Copy className="size-4" />} onClick={() => store().copy()} />
-      <RibbonButton label="Paste" icon={<ClipboardPaste className="size-4" />} onClick={() => store().paste()} />
-      <RibbonButton label="Rename" disabled={selected.length !== 1} icon={<Pencil className="size-4" />} onClick={() => {
-        const node = nodes[selected[0]];
-        if (node) store().openDialog({ kind: "rename", id: node.id, name: node.name });
-      }} />
-      <RibbonButton label="Delete" disabled={!selected.length} icon={<Trash2 className="size-4" />} onClick={() => selected.length && store().openDialog({ kind: "delete", ids: selected })} />
-      <SortMenu />
-      <ViewMenu />
-    </div>
-  );
-}
-
 function FilterMenu() {
   const active = useFiles((s) => s.active);
   const sortKey = useFiles((s) => s.panes[s.active].sortKey);
@@ -636,6 +614,7 @@ function FilterMenu() {
 
 function HomeRibbon() {
   const active = useFiles((s) => s.active);
+  const selected = useFiles((s) => s.panes[s.active].selected);
   const split = useFiles((s) => s.split);
   const pathId = useFiles((s) => s.panes[s.active].pathId);
   const nodes = useFiles((s) => s.nodes);
@@ -676,7 +655,6 @@ function HomeRibbon() {
         <MenuAction label="Snapshots" icon={<History className="size-4" />} onClick={() => store().openDialog({ kind: "snaps" })} />
         <MenuAction label="User folders" icon={<Folder className="size-4" />} onClick={() => store().openDialog({ kind: "snap-user" })} />
         <div className="my-1 h-px bg-line" />
-        <MenuAction label={split ? "One pane" : "Two panes"} icon={<Columns2 className="size-4" />} onClick={() => store().toggleSplit()} />
         <MenuAction label="Disk use" icon={<HardDrive className="size-4" />} onClick={() => openSpaceReport()} />
         <MenuAction label="Copy list" icon={<FileText className="size-4" />} onClick={() => void copyListing()} />
         <MenuAction label="Queue" icon={<ClipboardPaste className="size-4" />} onClick={() => store().toggleTransfers()} />
@@ -689,6 +667,18 @@ function HomeRibbon() {
         <MenuAction label="Unmount this drive" disabled={!drive || drive.mounted === false || drive.system} icon={<Unplug className="size-4" />} onClick={() => { if (drive && !drive.system) store().openDialog({ kind: "unmount", id: drive.id }); }} />
         <MenuAction label="Format this drive" disabled={!drive || drive.mounted === false || drive.system || !drive.name.endsWith(":")} icon={<Trash2 className="size-4" />} onClick={() => { if (drive && !drive.system && drive.name.endsWith(":")) store().openDialog({ kind: "format", id: drive.id }); }} />
       </SectionMenu>
+      <span className="mx-1 h-5 w-px bg-ribbon-edge" />
+      <RibbonButton label="Cut" disabled={!selected.length} icon={<Scissors className="size-4" />} onClick={() => store().cut()} />
+      <RibbonButton label="Copy" disabled={!selected.length} icon={<Copy className="size-4" />} onClick={() => store().copy()} />
+      <RibbonButton label="Paste" icon={<ClipboardPaste className="size-4" />} onClick={() => store().paste()} />
+      <RibbonButton label="Rename" disabled={selected.length !== 1} icon={<Pencil className="size-4" />} onClick={() => {
+        const node = nodes[selected[0]];
+        if (node) store().openDialog({ kind: "rename", id: node.id, name: node.name });
+      }} />
+      <RibbonButton label="Delete" disabled={!selected.length} icon={<Trash2 className="size-4" />} onClick={() => selected.length && store().openDialog({ kind: "delete", ids: selected })} />
+      <RibbonButton label={split ? "One pane" : "Two panes"} icon={<Columns2 className="size-4" />} onClick={() => store().toggleSplit()} />
+      <SortMenu />
+      <ViewMenu />
     </div>
   );
 }
@@ -1029,21 +1019,38 @@ async function copyListing() {
 
 function NavPlaces({ pane }: { pane: 0 | 1 }) {
   const pins = useFiles((s) => s.pins);
+  const pinsOpen = useFiles((s) => s.pinsOpen);
   const recent = useFiles((s) => s.recentPaths);
   const [recentOpen, setRecentOpen] = useState(false);
   const open = (path: string) => void useFiles.getState().openTypedPath(path);
-  const row = (path: string, label: string) => (
-    <button key={path} type="button" className="flex w-full items-center gap-1 px-2 py-1 text-left text-sm hover:bg-select" title={path} onClick={() => open(path)}>
-      <Folder className="size-3.5 shrink-0 text-muted" />
-      <span className="truncate">{label}</span>
-    </button>
+  const unpin = (path: string) => {
+    useFiles.setState((state) => ({
+      pins: state.pins.filter((item) => item.toLowerCase() !== path.toLowerCase()),
+      status: "Unpinned",
+    }));
+  };
+  const row = (path: string, label: string, withUnpin = false) => (
+    <div key={path} className="flex items-center pr-1">
+      <button type="button" className="flex min-w-0 flex-1 items-center gap-1 px-2 py-1 text-left text-sm hover:bg-select" title={path} onClick={() => open(path)}>
+        <Folder className="size-3.5 shrink-0 text-muted" />
+        <span className="truncate">{label}</span>
+      </button>
+      {withUnpin && (
+        <button type="button" aria-label={`Unpin ${label}`} className="grid size-6 shrink-0 place-items-center text-muted hover:text-ink" title="Unpin" onClick={() => unpin(path)}>
+          <X className="size-3" />
+        </button>
+      )}
+    </div>
   );
   return (
     <>
       <div className="border-b border-line py-1">
-        <p className="px-2 py-1 text-[11px] font-semibold text-muted">Pinned</p>
-        {pins.length === 0 && <p className="px-2 pb-1 text-xs text-muted">None yet</p>}
-        {pins.map((path) => row(path, path.split(/[/\\]/).filter(Boolean).pop() || path))}
+        <button type="button" className="flex w-full items-center gap-1 px-2 py-1 text-left text-[11px] font-semibold text-muted" onClick={() => useFiles.getState().setPinsOpen(!pinsOpen)}>
+          {pinsOpen ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
+          Pinned
+        </button>
+        {pinsOpen && pins.length === 0 && <p className="px-2 pb-1 text-xs text-muted">None yet</p>}
+        {pinsOpen && pins.map((path) => row(path, path.split(/[/\\]/).filter(Boolean).pop() || path, true))}
       </div>
       <div className="border-b border-line py-1">
         <button type="button" className="flex w-full items-center gap-1 px-2 py-1 text-left text-[11px] font-semibold text-muted" onClick={() => setRecentOpen((open) => !open)}>
@@ -1065,6 +1072,7 @@ function TreeBranch({ id, depth, pane }: { id: string; depth: number; pane: 0 | 
   const pathId = useFiles((s) => s.panes[pane].pathId);
   const filters = useFiles((s) => s.filters);
   const showAll = useFiles((s) => s.showAllDrives);
+  const pins = useFiles((s) => s.pins);
   const reading = useFiles((s) => s.reading);
   const [open, setOpen] = useState(depth < 1 || id === "c");
   const inPath = pathIds({ nodes, order: {} }, pathId).includes(id);
@@ -1077,6 +1085,8 @@ function TreeBranch({ id, depth, pane }: { id: string; depth: number; pane: 0 | 
     .filter((item) => item && item.kind !== "file" && flagVisible(item, filters) && (showAll || item.kind !== "drive" || item.mounted !== false));
   const here = pathId === id;
   const label = node.kind === "drive" ? driveCaption(node) : node.name;
+  const folderPath = diskPath(id) || (node.kind !== "file" && node.kind !== "computer" ? displayPath({ nodes, order: useFiles.getState().order }, id) : "");
+  const pinned = !!folderPath && pins.some((item) => item.toLowerCase() === folderPath.toLowerCase());
   return (
     <div>
       <button
@@ -1108,6 +1118,21 @@ function TreeBranch({ id, depth, pane }: { id: string; depth: number; pane: 0 | 
         )}
         <Icon node={node} />
         <span className="truncate">{label}</span>
+        {node.kind !== "file" && node.kind !== "computer" && folderPath && (
+          <span
+            role="button"
+            aria-label={pinned ? `Unpin ${label}` : `Pin ${label}`}
+            title={pinned ? "Unpin" : "Pin"}
+            className="ml-auto grid size-5 shrink-0 place-items-center"
+            onClick={(e) => {
+              e.stopPropagation();
+              e.preventDefault();
+              pinNode(id);
+            }}
+          >
+            <Star className={"size-3 " + (pinned ? "fill-current text-accent" : "text-muted")} />
+          </span>
+        )}
       </button>
       {open && folders.map((folder) => <TreeBranch key={folder.id} id={folder.id} depth={depth + 1} pane={pane} />)}
     </div>
@@ -1130,36 +1155,49 @@ function IconBoard({ index, rows, mode }: { index: 0 | 1; rows: ListRow[]; mode:
         const cut = clipboard?.mode === "cut" && row.nodeId && clipboard.ids.includes(row.nodeId);
         const label = row.kind === "drive" && row.nodeId && nodes[row.nodeId] ? driveCaption(nodes[row.nodeId]) : shownName(row.name, row.kind, showExt);
         return (
-          <button
+          <div
             key={row.id}
-            type="button"
             data-row={row.id}
             className={
-              "flex rounded-md text-left " +
-              (wide ? "items-center gap-2 px-2 py-1" : "flex-col items-center gap-1 px-2 py-2 text-center") +
+              "flex rounded-md " +
+              (wide ? "items-center gap-2 px-2 py-1" : "flex-col items-center gap-1 px-2 py-2") +
               (selected ? " bg-select" : " hover:bg-header") +
               (cut ? " opacity-50" : "")
             }
-            onClick={(e) => {
-              if (dragSelect.moved) {
-                dragSelect.moved = false;
-                return;
-              }
-              const ids = rows.map((item) => item.id);
-              if (e.shiftKey) useFiles.getState().selectRange(index, row.id, ids);
-              else if (e.metaKey || e.ctrlKey) useFiles.getState().toggleSelect(index, row.id);
-              else useFiles.getState().selectOnly(index, row.id);
-            }}
-            onDoubleClick={() => row.nodeId && useFiles.getState().openItem(index, row.nodeId)}
-            onContextMenu={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              useFiles.getState().setActive(index);
-              if (row.nodeId) useFiles.getState().selectOnly(index, row.nodeId);
-              useFiles.getState().openMenu({ x: e.clientX, y: e.clientY, id: row.nodeId ?? null });
-            }}
           >
-            {itemChecks && <input type="checkbox" checked={selected} readOnly tabIndex={-1} aria-label={`Select ${row.name}`} />}
+            {itemChecks && (
+              <input
+                type="checkbox"
+                checked={selected}
+                onPointerDown={(e) => e.stopPropagation()}
+                onMouseDown={(e) => e.stopPropagation()}
+                onClick={(e) => e.stopPropagation()}
+                onChange={() => useFiles.getState().toggleSelect(index, row.id)}
+                aria-label={`Select ${row.name}`}
+              />
+            )}
+            <button
+              type="button"
+              className={"flex min-w-0 flex-1 text-left " + (wide ? "items-center gap-2" : "flex-col items-center gap-1 text-center")}
+              onClick={(e) => {
+                if (dragSelect.moved) {
+                  dragSelect.moved = false;
+                  return;
+                }
+                const ids = rows.map((item) => item.id);
+                if (e.shiftKey) useFiles.getState().selectRange(index, row.id, ids);
+                else if (e.metaKey || e.ctrlKey) useFiles.getState().toggleSelect(index, row.id);
+                else useFiles.getState().selectOnly(index, row.id);
+              }}
+              onDoubleClick={() => row.nodeId && useFiles.getState().openItem(index, row.nodeId)}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                useFiles.getState().setActive(index);
+                if (row.nodeId && !useFiles.getState().panes[index].selected.includes(row.nodeId)) useFiles.getState().selectOnly(index, row.nodeId);
+                useFiles.getState().openMenu({ x: e.clientX, y: e.clientY, id: row.nodeId ?? null });
+              }}
+            >
             <Icon node={{ kind: row.kind, name: row.name, note: row.note }} className={icon + " shrink-0"} />
             <span className={wide ? "min-w-0 flex-1" : "w-full"}>
               <span className={"block truncate " + (wide ? "" : "text-xs")} title={row.name}>{label}</span>
@@ -1167,7 +1205,8 @@ function IconBoard({ index, rows, mode }: { index: 0 | 1; rows: ListRow[]; mode:
                 <span className="block truncate text-xs text-muted">{typeLabel(row.nodeId && nodes[row.nodeId] ? nodes[row.nodeId] : ({ kind: row.kind, name: row.name } as FsNode))}</span>
               )}
             </span>
-          </button>
+            </button>
+          </div>
         );
       })}
     </div>
@@ -1421,6 +1460,7 @@ function PaneView({ index }: { index: 0 | 1 }) {
                       (cut ? " opacity-50" : "")
                     }
                     onClick={(e) => {
+                      if ((e.target as HTMLElement).closest("input")) return;
                       if (dragSelect.moved) {
                         dragSelect.moved = false;
                         return;
@@ -1476,6 +1516,8 @@ function PaneView({ index }: { index: 0 | 1 }) {
                           <input
                             type="checkbox"
                             checked={selected}
+                            onPointerDown={(e) => e.stopPropagation()}
+                            onMouseDown={(e) => e.stopPropagation()}
                             onClick={(e) => e.stopPropagation()}
                             onChange={() => useFiles.getState().toggleSelect(index, row.id)}
                             aria-label={`Select ${row.name}`}
@@ -2124,7 +2166,7 @@ function SnapshotWindow() {
         <h2 className="text-base font-semibold">Snapshots</h2>
         <button type="button" aria-label="Close" onClick={() => useFiles.getState().openDialog(null)}><X className="size-4" /></button>
       </div>
-      <p className="mt-1 text-sm text-muted">A snapshot copies the files so they can be put back if something is deleted. Copies are stored on this PC and use extra disk space.</p>
+      <p className="mt-1 text-sm text-muted">A snapshot copies the files so they can be put back if something is deleted. You choose the folder when you save, including a folder on an external drive.</p>
       <div className="mt-3 grid gap-3 sm:grid-cols-[16rem_1fr]">
         <ul className="max-h-72 overflow-auto border border-line">
           {rows.length === 0 && <li className="px-2 py-3 text-sm text-muted">No snapshots yet</li>}
@@ -2166,7 +2208,7 @@ function Dialogs() {
     else if (dialog?.kind === "new") setText(dialog.file ? "New file.txt" : "New folder");
     else if (dialog?.kind === "preview") setText(dialog.body);
     else if (dialog?.kind === "goto") setText("C:\\");
-    else if (dialog?.kind === "custom") setText("");
+    else if (dialog?.kind === "custom" || dialog?.kind === "snap-dest" || dialog?.kind === "snap-user") setText("");
   }, [dialog]);
   if (!dialog) return null;
   return (
@@ -2263,14 +2305,44 @@ function Dialogs() {
         {dialog.kind === "network" && <NetworkDialog location={dialog.location} />}
         {dialog.kind === "snaps" && <SnapshotWindow />}
         {dialog.kind === "snap-user" && (
-          <div>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              void useFiles.getState().saveUserSnapshot(text.trim());
+            }}
+          >
             <h2 className="text-base font-semibold">Snapshot your folders?</h2>
-            <p className="mt-2 text-sm text-muted">This copies Desktop, Documents, Downloads, Pictures, Music, and Videos into Data Finder's snapshot folder. It uses extra disk space, and large folders can take a long time.</p>
+            <p className="mt-2 text-sm text-muted">This copies Desktop, Documents, Downloads, Pictures, Music, and Videos. Choose where to store the copy. Leave it blank to keep it on this PC, or pick an external drive.</p>
+            <label className="mt-3 block text-sm">
+              Save to
+              <input value={text} onChange={(e) => setText(e.target.value)} placeholder="E:\Snapshots" className="mt-1 h-11 w-full border border-line px-2" aria-label="Snapshot folder" />
+            </label>
             <div className="mt-3 flex justify-end gap-2">
               <button type="button" className="min-h-11 px-3" onClick={() => useFiles.getState().openDialog(null)}>Cancel</button>
-              <button type="button" className="min-h-11 bg-accent px-3 text-accent-ink" onClick={() => void useFiles.getState().saveUserSnapshot()}>Copy them</button>
+              <button type="button" className="min-h-11 px-3" onClick={() => void chooseFolder().then(setText).catch((error: unknown) => useFiles.setState({ status: error instanceof Error ? error.message : "No folder was chosen" }))}>Choose folder</button>
+              <button type="submit" className="min-h-11 bg-accent px-3 text-accent-ink">Copy them</button>
             </div>
-          </div>
+          </form>
+        )}
+        {dialog.kind === "snap-dest" && (
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              void useFiles.getState().saveSnapshotTo(text.trim());
+            }}
+          >
+            <h2 className="text-base font-semibold">Save snapshot</h2>
+            <p className="mt-2 text-sm text-muted">Choose a folder for this copy. Leave it blank to keep it on this PC, or pick an external drive.</p>
+            <label className="mt-3 block text-sm">
+              Save to
+              <input value={text} onChange={(e) => setText(e.target.value)} placeholder="E:\Snapshots" className="mt-1 h-11 w-full border border-line px-2" aria-label="Snapshot folder" />
+            </label>
+            <div className="mt-3 flex justify-end gap-2">
+              <button type="button" className="min-h-11 px-3" onClick={() => useFiles.getState().openDialog(null)}>Cancel</button>
+              <button type="button" className="min-h-11 px-3" onClick={() => void chooseFolder().then(setText).catch((error: unknown) => useFiles.setState({ status: error instanceof Error ? error.message : "No folder was chosen" }))}>Choose folder</button>
+              <button type="submit" className="min-h-11 bg-accent px-3 text-accent-ink">Save</button>
+            </div>
+          </form>
         )}
         {dialog.kind === "compare" && nodes[dialog.leftId] && nodes[dialog.rightId] && (
           <ComparePane leftId={dialog.leftId} rightId={dialog.rightId} />
@@ -2572,14 +2644,17 @@ function FormatDialog({ id }: { id: string }) {
 }
 
 function isPinned(id: string) {
-  const path = diskPath(id);
-  if (!path) return useFiles.getState().favorites.includes(id);
-  return useFiles.getState().pins.some((item) => item.toLowerCase() === path.toLowerCase());
+  const state = useFiles.getState();
+  const node = state.nodes[id];
+  const path = diskPath(id) || (node && node.kind !== "file" ? displayPath(state, id) : "");
+  if (!path) return state.favorites.includes(id);
+  return state.pins.some((item) => item.toLowerCase() === path.toLowerCase());
 }
 
 function pinNode(id: string) {
   const state = useFiles.getState();
-  const path = diskPath(id);
+  const node = state.nodes[id];
+  const path = diskPath(id) || (node && node.kind !== "file" && node.kind !== "computer" && /^[A-Za-z]:\\/.test(displayPath(state, id)) ? displayPath(state, id) : "");
   if (!path) {
     state.toggleFavorite(id);
     state.openMenu(null);
@@ -2949,6 +3024,7 @@ function RecoveryPage() {
           <span className="shrink-0 text-muted">Save to</span>
           <input value={dest} onChange={(e) => setDest(e.target.value)} placeholder="D:\Recovered" aria-label="Folder to save recovered files" className="h-9 w-full rounded-md border border-line bg-pane px-2" />
         </label>
+        <button type="button" className="h-9 rounded-md border border-line px-3 text-sm" onClick={() => void chooseFolder().then(setDest).catch((error: unknown) => setNote(error instanceof Error ? error.message : "No folder was chosen"))}>Choose folder</button>
         <button type="button" className="h-9 rounded-md bg-accent px-3 text-sm text-accent-ink disabled:opacity-40" disabled={busy || selected.length === 0} onClick={save}>
           Save {selected.length || ""} selected
         </button>
@@ -3039,6 +3115,7 @@ export function FileManager() {
         snaps: state.snaps,
         uiRev: 4,
         pins: state.pins,
+        pinsOpen: state.pinsOpen,
         recentPaths: state.recentPaths,
         showAllDrives: state.showAllDrives,
       };

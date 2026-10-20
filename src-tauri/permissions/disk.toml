@@ -28,4 +28,5 @@ commands.allow = [
   "snapshot_restore",
   "snapshot_remove",
   "open_path",
+  "choose_folder",
 ]
