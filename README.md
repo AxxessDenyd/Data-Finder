@@ -15,7 +15,11 @@ The same guide is inside the program. Open the Help tab, then Manual. Search the
 
 The program opens in one pane. The folder tree is on the left and the file list is on the right. Home, Find, Analyze, View, and Help are the tabs.
 
-Home is one row of menus: New, Edit, Go, Drives, View, Filter, Details, Shortcuts, and Layout. Under that is a bar for Cut, Copy, Paste, Rename, Delete, Sort, and View.
+Home is New, Go, Drives, Filter, Tools, and Settings, plus a bar for Cut, Copy, Paste, Rename, Delete, Sort, and View. The tabs are Home, Find, and Help. The menu button holds Second pane, Dark mode, Help, and About.
+
+Double-click a file to open it in the program Windows already uses for that file. Folder sizes are the full measured size. Recent, in the folder tree, folds open and closed.
+
+The newest installer and portable program are the Latest release on GitHub.
 
 The search box at the top right filters the open folder. Refresh sits next to the path. Check boxes sit beside each name. Pinned and Recent are at the top of the folder tree. Desktop, Documents, Downloads, Pictures, Music, and Videos start pinned.
 

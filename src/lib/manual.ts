@@ -10,10 +10,10 @@ export const aboutInfo = {
   created: "October 2026",
   author: "William Schneider",
   updated: "October 19, 2026",
-  version: "0.2.0",
-  latest: "https://github.com/AxxessDenyd/Data-Finder",
-  setup: "https://github.com/AxxessDenyd/Data-Finder/raw/main/Data-Finder-Setup.exe",
-  portable: "https://github.com/AxxessDenyd/Data-Finder/raw/main/Data-Finder.exe",
+  version: "0.2.1",
+  latest: "https://github.com/AxxessDenyd/Data-Finder/releases/latest",
+  setup: "https://github.com/AxxessDenyd/Data-Finder/releases/latest/download/Data-Finder-Setup.exe",
+  portable: "https://github.com/AxxessDenyd/Data-Finder/releases/latest/download/Data-Finder.exe",
 };
 
 export const manualSections: ManualSection[] = [
@@ -32,9 +32,9 @@ export const manualSections: ManualSection[] = [
       "The latest copies are on the project page. Use the links below.",
     ],
     links: [
-      { label: "Download the installer", href: "https://github.com/AxxessDenyd/Data-Finder/raw/main/Data-Finder-Setup.exe" },
-      { label: "Download the portable program", href: "https://github.com/AxxessDenyd/Data-Finder/raw/main/Data-Finder.exe" },
-      { label: "Project page", href: "https://github.com/AxxessDenyd/Data-Finder" },
+      { label: "Download the installer", href: "https://github.com/AxxessDenyd/Data-Finder/releases/latest/download/Data-Finder-Setup.exe" },
+      { label: "Download the portable program", href: "https://github.com/AxxessDenyd/Data-Finder/releases/latest/download/Data-Finder.exe" },
+      { label: "Latest release", href: "https://github.com/AxxessDenyd/Data-Finder/releases/latest" },
     ],
   },
   {
@@ -42,7 +42,8 @@ export const manualSections: ManualSection[] = [
     items: [
       "The folder tree starts with Pinned and Recent. Desktop, Documents, Downloads, Pictures, Music, and Videos are pinned the first time the program runs. Pin on the right-click menu adds the folder you have open.",
       "The search box at the top right filters the folder you have open. Refresh sits next to the path. Check boxes sit beside each name.",
-      "Home menus are New, Edit, Go, Drives, View, Filter, Details, Shortcuts, and Layout. A second bar has Cut, Copy, Paste, Rename, Delete, Sort, and View.",
+      "Home menus are New, Go, Drives, Filter, Tools, and Settings. A second bar has Cut, Copy, Paste, Rename, Delete, Sort, and View. The tabs are Home, Find, and Help.",
+      "The menu button holds Second pane, Dark mode, Help, and About.",
       "New creates a folder or a file. The list includes a text document, markdown, spreadsheet, web page, JSON, settings, PowerShell, batch, log, and an empty file. If the name is already there, a number is added.",
       "Filter sorts by name, size, date, or type. Click the same sort again to reverse it. It can also show folders, files, documents, pictures, music, videos, programs, archives, or items of 100 MB and up, and limit them to today, the past week, or the past month.",
       "Drag across empty space, or across items that are not already selected, to draw a box and select every file and folder inside it. Drag an item that is already selected to move it.",
@@ -55,14 +56,11 @@ export const manualSections: ManualSection[] = [
     title: "Home menus",
     items: [
       "New: folder and the file types Data Finder can create.",
-      "Edit: Open, Delete, Rename, Undo, New folder, and New file.",
-      "Go: Up, This computer, Unmount, Format, Refresh, Measure, and the size-bar style.",
+      "Go: Up, This computer, Refresh, Jump to path, and Places.",
       "Drives: show every drive, mount a drive that is waiting for a letter, map a network drive, add a network location, and disconnect a network drive.",
-      "View: icon sizes, List, Details, Tiles, Content, the details pane, the preview pane, and the Show list.",
       "Filter: sort order, file kind, and how recently an item changed.",
-      "Details: how many items are selected, Show details, Copy location, and Info.",
-      "Shortcuts: Starred places and folders you opened recently.",
-      "Layout: switch between one and two panes, compare folders, the queue, the activity log, and this manual.",
+      "Tools: snapshots, one or two panes, disk use, the queue, and activity.",
+      "Settings: dark mode, larger text, folder measuring, unmount, and format.",
     ],
   },
   {
@@ -102,7 +100,8 @@ export const manualSections: ManualSection[] = [
       "Drag a row onto a folder or the other pane to move it. Hold Ctrl while you drop to copy.",
       "Paste asks when the name is already there: keep both, rename the old file, overwrite, update newer files, or skip.",
       "Right-click for Open, Cut, Copy, Paste, Rename, Delete, New folder, New file, Copy location, Info, Pin, Refresh, and Save snapshot. The menu stays on the screen.",
-      "If a folder cannot be opened, the list says why and Try again reads it once more. A folder that cannot be measured says No access. Shortcuts to folders are opened as folders.",
+      "Double-click a file to open it in the program Windows uses for that kind of file, such as a photo viewer or a PDF reader. Double-click a folder to open it.",
+      "Folder sizes are the full measured size. A folder that cannot be read says No access.",
       "Ctrl+Z undoes the last change in the practice catalog. Changes on a real disk are not undone.",
     ],
   },

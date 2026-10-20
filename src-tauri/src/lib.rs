@@ -594,7 +594,7 @@ async fn measure_children(path: String) -> Result<Vec<Measured>, String> {
                 if meta.file_type().is_symlink() {
                     if let Ok(followed) = fs::metadata(entry.path()) {
                         if followed.is_dir() {
-                            let mut budget = 25_000u32;
+                            let mut budget = u32::MAX;
                             let (bytes, complete) = dir_size(&entry.path(), &mut budget, 0);
                             out.push(Measured {
                                 name: entry.file_name().to_string_lossy().to_string(),
@@ -616,7 +616,7 @@ async fn measure_children(path: String) -> Result<Vec<Measured>, String> {
                 });
                 continue;
             }
-            let mut budget = 25_000u32;
+            let mut budget = u32::MAX;
             let (bytes, complete) = dir_size(&entry.path(), &mut budget, 0);
             let partial = !complete;
             out.push(Measured {
@@ -920,6 +920,9 @@ fn known_folders() -> Vec<KnownFolder> {
             ("Pictures", (0x33E28130, 0x4E1E, 0x4676, [0x83, 0x5A, 0x98, 0x39, 0x5C, 0x3B, 0xC3, 0xBB])),
             ("Music", (0x4BD8D571, 0x6D19, 0x48D3, [0xBE, 0x97, 0x42, 0x22, 0x20, 0x08, 0x0E, 0x43])),
             ("Videos", (0x18989B1D, 0x99B5, 0x455B, [0x84, 0x1C, 0xAB, 0x7C, 0x74, 0xE4, 0xDD, 0xFC])),
+            ("Windows", (0xF38BF404, 0x1D43, 0x42F2, [0x93, 0x05, 0x67, 0xDE, 0x0B, 0x28, 0xFC, 0x23])),
+            ("Program Files", (0x905E63B6, 0xC1BF, 0x494E, [0xB2, 0x9C, 0x65, 0xB7, 0x32, 0xD3, 0xD2, 0x1A])),
+            ("Program Files (x86)", (0x7C5A40EF, 0xA0FB, 0x4BFC, [0x87, 0x4A, 0xC0, 0xF2, 0xE0, 0xB9, 0xFA, 0x8E])),
         ];
         let mut out = Vec::new();
         for (name, id) in ids {
@@ -1069,6 +1072,29 @@ fn open_url(url: String) -> Result<(), String> {
     }
 }
 
+#[tauri::command]
+fn open_path(path: String) -> Result<(), String> {
+    if path.chars().any(|ch| ch.is_control()) || !Path::new(&path).exists() {
+        return Err("That file could not be opened".into());
+    }
+    #[cfg(windows)]
+    {
+        #[link(name = "shell32")]
+        extern "system" {
+            fn ShellExecuteW(hwnd: isize, op: *const u16, file: *const u16, params: *const u16, dir: *const u16, show: i32) -> isize;
+        }
+        let code = unsafe { ShellExecuteW(0, wide("open").as_ptr(), wide(&path).as_ptr(), std::ptr::null::<u16>(), std::ptr::null::<u16>(), 1) };
+        if code <= 32 {
+            return Err("Windows could not open that file".into());
+        }
+        return Ok(());
+    }
+    #[cfg(not(windows))]
+    {
+        Err("Opening a file works in the Windows program".into())
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -1092,7 +1118,8 @@ pub fn run() {
             snapshot_save,
             snapshot_list,
             snapshot_restore,
-            snapshot_remove
+            snapshot_remove,
+            open_path
         ])
         .run(tauri::generate_context!())
         .expect("Data Finder failed to start");

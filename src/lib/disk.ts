@@ -406,6 +406,10 @@ export interface KnownFolder {
   path: string;
 }
 
+export async function openDiskFile(path: string): Promise<void> {
+  await invoke("open_path", { path });
+}
+
 export async function openExternal(url: string): Promise<void> {
   if (!isDesktop()) {
     window.open(url, "_blank", "noopener");

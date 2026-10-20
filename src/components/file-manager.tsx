@@ -83,9 +83,7 @@ const NO_CHILDREN: string[] = [];
 
 function shownSize(bytes: number | null | undefined, approx?: boolean, blocked?: boolean) {
   if (blocked) return "No access";
-  const text = formatSize(bytes);
-  if (!text) return "";
-  return approx ? `${text}+` : text;
+  return formatSize(bytes);
 }
 
 function shownName(name: string, kind: string, showExt: boolean) {
@@ -207,56 +205,36 @@ function MenuPop({ children, onClose }: { children: ReactNode; onClose: () => vo
   );
 }
 
-const PLACE_GROUPS: Array<{ title: string; items: Array<[string, string]> }> = [
-  { title: "System", items: [["win", "Windows"], ["sys32", "System32"], ["drivers", "Drivers"], ["config", "Config"], ["pf", "Prog. Files"]] },
-  { title: "32-bit", items: [["pfx86", "Prog. Files"], ["syswow", "SysWOW64"]] },
-  { title: "Current user", items: [["desktop", "Desktop"], ["docs", "Documents"], ["appdata", "AppData"], ["startmenu", "Start Menu"], ["temp", "Temp"], ["owner", "Profile"], ["favdir", "Favorites"], ["music", "Music"], ["pics", "Pictures"], ["videos", "Videos"]] },
-  { title: "All users", items: [["pubdesk", "Desktop"], ["pubdocs", "Documents"], ["pdata", "Prog. Data"], ["pubstart", "Start Menu"], ["pubtemp", "Temp"]] },
-];
-
 function PlacesMenu({ anchor, onClose }: { anchor: DOMRect; onClose: () => void }) {
+  const places = useFiles((s) => s.quickPlaces);
+  const pins = useFiles((s) => s.pins);
   const nodes = useFiles((s) => s.nodes);
   const active = useFiles((s) => s.active);
-  const favorites = useFiles((s) => s.favorites);
-  const pathId = useFiles((s) => s.panes[s.active].pathId);
-  const go = (id: string) => {
-    if (!useFiles.getState().nodes[id]) return;
-    useFiles.getState().navigate(active, id);
+  const openPath = (path: string) => {
+    void useFiles.getState().openTypedPath(path);
     onClose();
   };
-  const left = Math.max(8, Math.min(anchor.left, window.innerWidth - 336));
+  const rows = places.length
+    ? places
+    : pins.map((path) => ({ name: path.split(/[/\\]/).filter(Boolean).pop() || path, path }));
+  const left = Math.max(8, Math.min(anchor.left, window.innerWidth - 280));
   return (
     <>
       <button type="button" aria-label="Close places" className="fixed inset-0 z-30 cursor-default" onClick={onClose} />
-      <div className="fixed z-40 max-h-[70vh] w-80 overflow-auto border border-line bg-pane shadow-md" style={{ left, top: anchor.bottom + 4 }}>
-        {favorites.length > 0 && (
-          <div className="border-b border-line p-2">
-            <div className="mb-1 text-xs font-semibold text-muted">Pinned</div>
-            <div className="flex flex-wrap gap-1">
-              {favorites.map((id) => nodes[id] && (
-                <button key={id} type="button" className="max-w-full truncate px-2 py-1 text-xs hover:bg-select" onClick={() => go(id)}>
-                  {nodes[id].name}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-        {PLACE_GROUPS.map((group) => (
-          <div key={group.title}>
-            <div className="bg-header px-2 py-1 text-xs font-semibold">{group.title}</div>
-            <div className="grid grid-cols-5 gap-1 p-2">
-              {group.items.filter(([id]) => nodes[id]).map(([id, label]) => (
-                <button key={id} type="button" className="flex min-h-14 flex-col items-center justify-center gap-1 px-1 py-1 text-center text-[11px] leading-tight hover:bg-select" onClick={() => go(id)}>
-                  <Folder className="size-5 text-folder" />
-                  {label}
-                </button>
-              ))}
-            </div>
-          </div>
+      <div className="fixed z-40 max-h-[70vh] w-64 overflow-auto border border-line bg-pane p-1 shadow-md" style={{ left, top: anchor.bottom + 4 }}>
+        {rows.length === 0 && <p className="px-2 py-2 text-sm text-muted">No folders yet</p>}
+        {rows.map((place) => (
+          <button key={place.path} type="button" className="flex min-h-9 w-full items-center gap-2 rounded-md px-2 text-left text-sm hover:bg-select" title={place.path} onClick={() => openPath(place.path)}>
+            <Folder className="size-4 shrink-0 text-folder" />
+            <span className="truncate">{place.name}</span>
+          </button>
         ))}
-        <button type="button" className="block min-h-11 w-full border-t border-line px-3 text-left text-sm hover:bg-select" onClick={() => { useFiles.getState().toggleFavorite(); onClose(); }}>
-          {favorites.includes(pathId) ? "Unpin this folder" : "Pin this folder"}
-        </button>
+        {rows.length === 0 && Object.values(nodes).filter((node) => node.kind === "dir").slice(0, 8).map((node) => (
+          <button key={node.id} type="button" className="flex min-h-9 w-full items-center gap-2 rounded-md px-2 text-left text-sm hover:bg-select" onClick={() => { useFiles.getState().navigate(active, node.id); onClose(); }}>
+            <Folder className="size-4 shrink-0 text-folder" />
+            <span className="truncate">{node.name}</span>
+          </button>
+        ))}
       </div>
     </>
   );
@@ -422,59 +400,26 @@ function TabRow() {
   const reading = useFiles((s) => s.reading);
   const dark = useFiles((s) => s.dark);
   const [menu, setMenu] = useState(false);
-  const [sub, setSub] = useState(false);
   const tabs: Array<[RibbonTab, string]> = [
     ["home", "Home"],
     ["inspect", "Find"],
-    ["tools", "Analyze"],
-    ["options", "View"],
     ["resources", "Help"],
   ];
   const go = (id: RibbonTab) => useFiles.getState().setTab(id);
   return (
     <div className="flex shrink-0 items-end bg-tab">
       <div className="relative mb-1 ml-1">
-        <button type="button" aria-label="Application menu" className="grid size-8 place-items-center bg-accent text-accent-ink" onClick={() => { setMenu((open) => !open); setSub(false); }}>
+        <button type="button" aria-label="Application menu" className="grid size-8 place-items-center bg-accent text-accent-ink" onClick={() => setMenu((open) => !open)}>
           <Menu className="size-4" />
         </button>
         {menu && (
           <>
-            <button type="button" aria-label="Close menu" className="fixed inset-0 z-20 cursor-default" onClick={() => { setMenu(false); setSub(false); }} />
+            <button type="button" aria-label="Close menu" className="fixed inset-0 z-20 cursor-default" onClick={() => setMenu(false)} />
             <div className="absolute top-full left-0 z-30 min-w-56 border border-line bg-pane py-1 shadow-md">
-              <div className="relative">
-                <button type="button" className={"block min-h-11 w-full px-3 text-left text-sm hover:bg-select " + (sub ? "bg-select" : "")} onClick={() => setSub((open) => !open)}>
-                  New view
-                </button>
-                {sub && (
-                  <div className="border-y border-line bg-header py-1 sm:absolute sm:top-0 sm:left-full sm:w-64 sm:border sm:bg-pane sm:shadow-md">
-                    <button type="button" className="block w-full px-3 py-2 text-left hover:bg-select" onClick={() => { const state = useFiles.getState(); if (!state.split) state.toggleSplit(); else useFiles.setState({ status: "The second pane is already open" }); setMenu(false); }}>
-                      <span className="block text-sm font-semibold">Second pane</span>
-                      <span className="block text-xs text-muted">Show another folder beside this one.</span>
-                    </button>
-                    <button type="button" className="block w-full px-3 py-2 text-left hover:bg-select" onClick={() => { useFiles.getState().openDialog({ kind: "search" }); setMenu(false); }}>
-                      <span className="block text-sm font-semibold">Search</span>
-                      <span className="block text-xs text-muted">Find names in a catalog folder.</span>
-                    </button>
-                    <button type="button" className="block w-full px-3 py-2 text-left hover:bg-select" onClick={() => {
-                      const state = useFiles.getState();
-                      const hit = shadows.find((item) => item.folderId === state.panes[state.active].pathId);
-                      state.setTab("tools");
-                      if (hit) state.openShadow(state.active, hit.id);
-                      else useFiles.setState({ status: "No snapshots for this folder" });
-                      setMenu(false);
-                    }}>
-                      <span className="block text-sm font-semibold">Snapshots</span>
-                      <span className="block text-xs text-muted">Open a saved copy of this folder.</span>
-                    </button>
-                  </div>
-                )}
-              </div>
-              <button type="button" className="block min-h-11 w-full px-3 text-left text-sm hover:bg-select" onClick={() => { useFiles.getState().openDialog({ kind: "operation" }); setMenu(false); }}>Copy between folders</button>
-              <button type="button" className="block min-h-11 w-full px-3 text-left text-sm hover:bg-select" onClick={() => { useFiles.getState().toggleTransfers(); setMenu(false); }}>Queue</button>
-              <button type="button" className="block min-h-11 w-full px-3 text-left text-sm hover:bg-select" onClick={() => { useFiles.getState().toggleLog(); setMenu(false); }}>Activity</button>
-              <button type="button" className="block min-h-11 w-full px-3 text-left text-sm hover:bg-select" onClick={() => { useFiles.getState().openDialog({ kind: "goto" }); setMenu(false); }}>Jump to path</button>
+              <button type="button" className="block min-h-11 w-full px-3 text-left text-sm hover:bg-select" onClick={() => { const state = useFiles.getState(); if (!state.split) state.toggleSplit(); else useFiles.setState({ status: "The second pane is already open" }); setMenu(false); }}>Second pane</button>
               <button type="button" className="block min-h-11 w-full px-3 text-left text-sm hover:bg-select" onClick={() => { useFiles.getState().setOptions({ dark: !dark }); setMenu(false); }}>{dark ? "Light mode" : "Dark mode"}</button>
               <button type="button" className="block min-h-11 w-full px-3 text-left text-sm hover:bg-select" onClick={() => { go("resources"); setMenu(false); }}>Help</button>
+              <button type="button" className="block min-h-11 w-full px-3 text-left text-sm hover:bg-select" onClick={() => { const state = useFiles.getState(); state.setTab("resources"); state.setHelpPage("about"); setMenu(false); }}>About</button>
             </div>
           </>
         )}
@@ -649,19 +594,15 @@ function FilterMenu() {
 function HomeRibbon() {
   const active = useFiles((s) => s.active);
   const split = useFiles((s) => s.split);
-  const barMode = useFiles((s) => s.barMode);
-  const canUndo = useFiles((s) => s.undoStack.length > 0);
   const pathId = useFiles((s) => s.panes[s.active].pathId);
-  const selected = useFiles((s) => s.panes[s.active].selected);
-  const recent = useFiles((s) => s.recent);
   const nodes = useFiles((s) => s.nodes);
   const order = useFiles((s) => s.order);
   const drive = driveOf({ nodes, order }, pathId);
-  const infoCount = selected.length;
-  const infoBytes = selected.reduce((sum, id) => sum + (nodes[id]?.bytes ?? 0), 0);
-  const infoKnown = selected.every((id) => nodes[id]?.bytes != null);
-  const [favOpen, setFavOpen] = useState(false);
-  const [favBox, setFavBox] = useState<DOMRect | null>(null);
+  const dark = useFiles((s) => s.dark);
+  const reading = useFiles((s) => s.reading);
+  const calcDirs = useFiles((s) => s.calcDirs);
+  const [placesOpen, setPlacesOpen] = useState(false);
+  const [placesBox, setPlacesBox] = useState<DOMRect | null>(null);
   const [desktop, setDesktop] = useState(false);
   const store = useFiles.getState;
   useEffect(() => setDesktop(isDesktop()), []);
@@ -681,62 +622,34 @@ function HomeRibbon() {
         <MenuAction label="Log" icon={<FileText className="size-4" />} onClick={() => store().newItem(freshName("Log.log"), true)} />
         <MenuAction label="Empty file" icon={<FilePlus className="size-4" />} onClick={() => store().newItem(freshName("New file"), true)} />
       </SectionMenu>
-      <SectionMenu label="Edit">
-        <MenuAction label="Open" disabled={!selected.length} icon={<File className="size-4" />} onClick={() => selected[0] && store().openItem(active, selected[0])} />
-        <MenuAction label="Delete" disabled={!selected.length} icon={<Trash2 className="size-4" />} onClick={() => selected.length && store().openDialog({ kind: "delete", ids: selected })} />
-        <MenuAction label="Rename" disabled={selected.length !== 1} icon={<Pencil className="size-4" />} onClick={() => {
-          const node = nodes[selected[0]];
-          if (node) store().openDialog({ kind: "rename", id: node.id, name: node.name });
-        }} />
-        <MenuAction label="Undo" disabled={!canUndo} icon={<RotateCcw className="size-4" />} onClick={() => store().undo()} />
-        <MenuAction label="New folder" icon={<FolderPlus className="size-4" />} onClick={() => store().openDialog({ kind: "new", file: false })} />
-        <MenuAction label="New file" icon={<FilePlus className="size-4" />} onClick={() => store().openDialog({ kind: "new", file: true })} />
-      </SectionMenu>
       <SectionMenu label="Go">
         <MenuAction label="Up" icon={<ArrowUp className="size-4" />} onClick={() => store().goUp()} />
         <MenuAction label={desktop ? "This computer" : "Open folder"} icon={<HardDrive className="size-4" />} onClick={() => void store().openFolder()} />
-        <MenuAction label="Unmount" disabled={!drive || drive.mounted === false || drive.system} icon={<Unplug className="size-4" />} onClick={() => {
-          if (drive && !drive.system) store().openDialog({ kind: "unmount", id: drive.id });
-        }} />
-        <MenuAction label="Format" disabled={!drive || drive.mounted === false || drive.system || !drive.name.endsWith(":")} icon={<Trash2 className="size-4" />} onClick={() => {
-          if (drive && !drive.system && drive.name.endsWith(":")) store().openDialog({ kind: "format", id: drive.id });
-        }} />
         <MenuAction label="Refresh" icon={<RefreshCw className="size-4" />} onClick={() => store().refresh()} />
-        <MenuAction label="Measure" icon={<Ruler className="size-4" />} onClick={() => void store().calcSizes()} />
-        <MenuAction label={barMode === "log" ? "Compressed bars" : "Even bars"} icon={<Scale className="size-4" />} onClick={() => store().toggleBarMode()} />
+        <MenuAction label="Jump to path" icon={<Search className="size-4" />} onClick={() => store().openDialog({ kind: "goto" })} />
+        <MenuAction label="Places" icon={<Folder className="size-4" />} onClick={(event) => { setPlacesBox(event.currentTarget.getBoundingClientRect()); setPlacesOpen(true); }} />
       </SectionMenu>
       <DriveMenu />
-      <ViewMenu />
       <FilterMenu />
-      <SectionMenu label="Details">
-        <p className="px-2 py-1 text-xs text-muted">
-          {infoCount ? `${infoCount} selected${infoKnown ? ` · ${formatSize(infoBytes)}` : ""}` : "Nothing selected"}
-        </p>
-        <MenuAction label="Show details" icon={<PanelLeft className="size-4" />} onClick={() => store().setOptions({ detailsOpen: true })} />
-        <MenuAction label="Copy location" icon={<Link className="size-4" />} onClick={() => void store().copyPath(selected[0])} />
-        <MenuAction label="Info" disabled={selected.length !== 1} icon={<FileText className="size-4" />} onClick={() => selected[0] && store().openDialog({ kind: "props", id: selected[0] })} />
-      </SectionMenu>
-      <SectionMenu label="Shortcuts">
-        <MenuAction label="Starred" icon={<Star className="size-4" />} onClick={(event) => { setFavBox(event.currentTarget.getBoundingClientRect()); setFavOpen(true); }} />
+      <SectionMenu label="Tools">
+        <MenuAction label="Save snapshot" icon={<History className="size-4" />} onClick={() => store().takeSnapshot()} />
+        <MenuAction label="Snapshots" icon={<History className="size-4" />} onClick={() => store().openDialog({ kind: "snaps" })} />
+        <MenuAction label="User folders" icon={<Folder className="size-4" />} onClick={() => store().openDialog({ kind: "snap-user" })} />
         <div className="my-1 h-px bg-line" />
-        {recent.length === 0 && <p className="px-2 py-1 text-xs text-muted">No recent folders</p>}
-        {[...recent].reverse().map((id) => (
-          <MenuAction key={id} label={nodes[id] ? displayPath({ nodes, order: {} }, id) : id} icon={<History className="size-4" />} onClick={() => store().navigate(active, id)} />
-        ))}
-      </SectionMenu>
-      {favOpen && favBox && <PlacesMenu anchor={favBox} onClose={() => setFavOpen(false)} />}
-      <SectionMenu label="Layout">
         <MenuAction label={split ? "One pane" : "Two panes"} icon={<Columns2 className="size-4" />} onClick={() => store().toggleSplit()} />
-        <MenuAction label="Gaps" icon={<Diff className="size-4" />} onClick={() => store().toggleDiff()} />
-        <MenuAction label="Copy missing" disabled={!split} icon={<ArrowLeftRight className="size-4" />} onClick={() => store().mirror()} />
-        <MenuAction label="Update other" disabled={!split} icon={<FolderSync className="size-4" />} onClick={() => store().syncOther()} />
-        <MenuAction label="All files" icon={<ListTree className="size-4" />} onClick={() => store().toggleFlat()} />
-        <MenuAction label="Line up" disabled={!split} icon={<GitCompare className="size-4" />} onClick={() => store().compare()} />
-        <MenuAction label="Same size" icon={<Files className="size-4" />} onClick={() => store().toggleDupes()} />
+        <MenuAction label="Disk use" icon={<HardDrive className="size-4" />} onClick={() => openSpaceReport()} />
+        <MenuAction label="Copy list" icon={<FileText className="size-4" />} onClick={() => void copyListing()} />
         <MenuAction label="Queue" icon={<ClipboardPaste className="size-4" />} onClick={() => store().toggleTransfers()} />
         <MenuAction label="Activity" icon={<FileText className="size-4" />} onClick={() => store().toggleLog()} />
-        <MenuAction label="Manual" icon={<CircleHelp className="size-4" />} onClick={() => store().setTab("resources")} />
       </SectionMenu>
+      <SectionMenu label="Settings">
+        <MenuAction label={dark ? "Light mode" : "Dark mode"} icon={<Moon className="size-4" />} onClick={() => store().setOptions({ dark: !dark })} />
+        <MenuAction label={reading ? "Normal text" : "Larger text"} icon={<FileText className="size-4" />} onClick={() => store().setOptions({ reading: !reading })} />
+        <MenuAction label={calcDirs ? "Stop measuring folders" : "Measure folders"} icon={<Ruler className="size-4" />} onClick={() => store().setOptions({ calcDirs: !calcDirs })} />
+        <MenuAction label="Unmount this drive" disabled={!drive || drive.mounted === false || drive.system} icon={<Unplug className="size-4" />} onClick={() => { if (drive && !drive.system) store().openDialog({ kind: "unmount", id: drive.id }); }} />
+        <MenuAction label="Format this drive" disabled={!drive || drive.mounted === false || drive.system || !drive.name.endsWith(":")} icon={<Trash2 className="size-4" />} onClick={() => { if (drive && !drive.system && drive.name.endsWith(":")) store().openDialog({ kind: "format", id: drive.id }); }} />
+      </SectionMenu>
+      {placesOpen && placesBox && <PlacesMenu anchor={placesBox} onClose={() => setPlacesOpen(false)} />}
     </div>
   );
 }
@@ -966,7 +879,16 @@ function ManualPage() {
         <ul className="mt-2 space-y-1">
           {sections.map((section) => (
             <li key={section.title}>
-              <a href={`#manual-${section.title}`} className="block rounded-md px-2 py-1 text-sm hover:bg-select">{section.title}</a>
+              <a
+                href={`#manual-${section.title}`}
+                className="block rounded-md px-2 py-1 text-sm hover:bg-select"
+                onClick={(event) => {
+                  event.preventDefault();
+                  document.getElementById(`manual-${section.title}`)?.scrollIntoView({ block: "start" });
+                }}
+              >
+                {section.title}
+              </a>
             </li>
           ))}
         </ul>
@@ -992,7 +914,12 @@ function ManualPage() {
                 <ul className="mt-2 space-y-1 text-sm">
                   {section.links.map((link) => (
                     <li key={link.href}>
-                      <a href={link.href} className="text-accent underline" onClick={(event) => { event.preventDefault(); void openExternal(link.href); }}>{link.label}</a>
+                      <a href={link.href} className="text-accent underline" onClick={(event) => {
+                        event.preventDefault();
+                        void openExternal(link.href).catch((error: unknown) => {
+                          useFiles.setState({ status: error instanceof Error ? error.message : "Could not open that link" });
+                        });
+                      }}>{link.label}</a>
                     </li>
                   ))}
                 </ul>
@@ -1063,24 +990,39 @@ async function copyListing() {
 
 function NavPlaces({ pane }: { pane: 0 | 1 }) {
   const pins = useFiles((s) => s.pins);
+  const places = useFiles((s) => s.quickPlaces);
   const recent = useFiles((s) => s.recentPaths);
+  const [recentOpen, setRecentOpen] = useState(false);
   const open = (path: string) => void useFiles.getState().openTypedPath(path);
-  const block = (title: string, paths: string[]) => (
-    <div className="border-b border-line py-1">
-      <p className="px-2 py-1 text-[11px] font-semibold text-muted">{title}</p>
-      {paths.length === 0 && <p className="px-2 pb-1 text-xs text-muted">None yet</p>}
-      {paths.map((path) => (
-        <button key={path} type="button" className="flex w-full items-center gap-1 px-2 py-1 text-left text-sm hover:bg-select" title={path} onClick={() => open(path)}>
-          <Folder className="size-3.5 shrink-0 text-muted" />
-          <span className="truncate">{path.split(/[/\\]/).filter(Boolean).pop() || path}</span>
-        </button>
-      ))}
-    </div>
+  const pinned = new Set(pins.map((path) => path.toLowerCase()));
+  const extra = places.filter((place) => !pinned.has(place.path.toLowerCase()));
+  const row = (path: string, label: string) => (
+    <button key={path} type="button" className="flex w-full items-center gap-1 px-2 py-1 text-left text-sm hover:bg-select" title={path} onClick={() => open(path)}>
+      <Folder className="size-3.5 shrink-0 text-muted" />
+      <span className="truncate">{label}</span>
+    </button>
   );
   return (
     <>
-      {block("Pinned", pins)}
-      {block("Recent", recent.slice(0, 8))}
+      <div className="border-b border-line py-1">
+        <p className="px-2 py-1 text-[11px] font-semibold text-muted">Pinned</p>
+        {pins.length === 0 && <p className="px-2 pb-1 text-xs text-muted">None yet</p>}
+        {pins.map((path) => row(path, path.split(/[/\\]/).filter(Boolean).pop() || path))}
+      </div>
+      {extra.length > 0 && (
+        <div className="border-b border-line py-1">
+          <p className="px-2 py-1 text-[11px] font-semibold text-muted">Places</p>
+          {extra.map((place) => row(place.path, place.name))}
+        </div>
+      )}
+      <div className="border-b border-line py-1">
+        <button type="button" className="flex w-full items-center gap-1 px-2 py-1 text-left text-[11px] font-semibold text-muted" onClick={() => setRecentOpen((open) => !open)}>
+          {recentOpen ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
+          Recent
+        </button>
+        {recentOpen && recent.length === 0 && <p className="px-2 pb-1 text-xs text-muted">None yet</p>}
+        {recentOpen && recent.slice(0, 8).map((path) => row(path, path.split(/[/\\]/).filter(Boolean).pop() || path))}
+      </div>
       <TreeBranch id="pc" depth={0} pane={pane} />
     </>
   );
@@ -2814,7 +2756,7 @@ function HeaderSearch() {
   const active = useFiles((s) => s.active);
   const query = useFiles((s) => s.panes[s.active].query);
   return (
-    <label className="ml-auto flex h-8 w-56 items-center gap-1 rounded-md border border-line bg-pane px-2">
+    <label className="flex h-8 w-56 items-center gap-1 rounded-md border border-line bg-pane px-2">
       <Search className="size-3.5 text-muted" />
       <input
         value={query}
@@ -2999,8 +2941,7 @@ export function FileManager() {
   const helpPage = useFiles((s) => s.helpPage);
   return (
     <div className="flex h-dvh flex-col overflow-hidden bg-app text-ink">
-      <header className="flex h-10 shrink-0 items-center gap-3 px-3">
-        <h1 className="text-xs font-semibold">Data Finder</h1>
+      <header className="flex h-10 shrink-0 items-center justify-end px-3">
         <HeaderSearch />
       </header>
       <TabRow />

@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { diskCreate, diskPath, diskRemoveNamed, diskRename, diskTransfer, fetchDrives, forgetDisk, formatVolume, isDesktop, isDiskId, knownFolders, listSnapshots, loadChildren, loadDesktopComputer, mapNetwork, measureChildren, mountImage, mountVolume, pickFolder, readDiskText, removeSnapshot, restoreSnapshot, saveSnapshot, setDiskPath, unmountVolume, type DiskJob, type DiskSnapshot } from "@/lib/disk";
+import { diskCreate, diskPath, diskRemoveNamed, diskRename, diskTransfer, fetchDrives, forgetDisk, formatVolume, isDesktop, isDiskId, knownFolders, listSnapshots, loadChildren, loadDesktopComputer, mapNetwork, measureChildren, mountImage, mountVolume, openDiskFile, pickFolder, removeSnapshot, restoreSnapshot, saveSnapshot, setDiskPath, unmountVolume, type DiskJob, type DiskSnapshot, type KnownFolder } from "@/lib/disk";
 import {
   childrenOf,
   cloneSubtree,
@@ -268,6 +268,7 @@ interface FileState extends FsSnapshot {
   showAllDrives: boolean;
   pins: string[];
   recentPaths: string[];
+  quickPlaces: KnownFolder[];
   readerId: string | null;
 }
 
@@ -772,6 +773,7 @@ export const useFiles = create<FileState & Actions>((set, get) => ({
   showAllDrives: false,
   pins: [],
   recentPaths: [],
+  quickPlaces: [],
   snaps: [],
   readerId: null,
 
@@ -1634,24 +1636,14 @@ export const useFiles = create<FileState & Actions>((set, get) => ({
     }
     if (isDiskId(node.id)) {
       const opened = diskPath(node.id);
-      if (opened) get().rememberPath(opened);
-      void readDiskText(node.id, node.name)
-        .then((text) => {
-          set({
-            dialog: {
-              kind: "preview",
-              title: node.name,
-              body: text ?? `${node.name} is a real file.\n\nPath: ${displayPath(get(), id)}`,
-            },
-            menu: null,
-          });
-        })
-        .catch((error: unknown) => {
-          set({
-            dialog: { kind: "preview", title: node.name, body: error instanceof Error ? error.message : "Could not open that file" },
-            menu: null,
-          });
-        });
+      if (opened) {
+        get().rememberPath(opened);
+        void openDiskFile(opened)
+          .then(() => set({ status: `Opened ${node.name}`, menu: null }))
+          .catch((error: unknown) => set({ status: error instanceof Error ? error.message : "Could not open that file", menu: null }));
+        return;
+      }
+      set({ status: "That file is not on a drive", menu: null });
       return;
     }
     if (node.note != null) {
@@ -2246,8 +2238,9 @@ export const useFiles = create<FileState & Actions>((set, get) => ({
         set({ status: "Reading this computer" });
         const tree = await loadDesktopComputer();
         const folders = await knownFolders();
-        const pins = get().pins.length ? get().pins : folders.map((folder) => folder.path);
-        set({ nodes: tree.nodes, order: tree.order, undoStack: [], clipboard: null, pins, status: "This computer" });
+        const personal = new Set(["Desktop", "Documents", "Downloads", "Pictures", "Music", "Videos"]);
+        const pins = get().pins.length ? get().pins : folders.filter((folder) => personal.has(folder.name)).map((folder) => folder.path);
+        set({ nodes: tree.nodes, order: tree.order, undoStack: [], clipboard: null, pins, quickPlaces: folders, status: "This computer" });
         get().navigate(pane, tree.openId, false);
       } catch (error) {
         set({ status: error instanceof Error ? error.message : "Could not read this computer" });
