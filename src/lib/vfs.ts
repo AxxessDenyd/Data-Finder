@@ -16,6 +16,8 @@ export interface FsNode {
   note?: string;
   /** True when a real-disk folder walk stopped early. The size is a minimum. */
   approx?: boolean;
+  /** True when the folder could not be read. */
+  blocked?: boolean;
   /** False when a drive has no media or no mount point. */
   mounted?: boolean;
   /** Volume name, such as Windows. The drive letter stays in name. */
@@ -70,10 +72,7 @@ export function driveCaption(node: FsNode): string {
 }
 
 export function typeLabel(node: FsNode): string {
-  if (node.kind === "drive") {
-    const mount = node.mounted === false ? "Not mounted" : "Mounted";
-    return `${mount} · ${node.note || "Disk"}`;
-  }
+  if (node.kind === "drive") return node.note || "Disk";
   if (node.kind === "dir") return "File Folder";
   if (node.kind === "computer") return "Computer";
   const ext = node.name.includes(".") ? node.name.split(".").pop()!.toUpperCase() : "";

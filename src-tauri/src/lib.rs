@@ -26,6 +26,7 @@ struct Measured {
     name: String,
     bytes: Option<u64>,
     partial: bool,
+    blocked: bool,
 }
 
 fn modified_ms(meta: &fs::Metadata) -> u64 {
@@ -192,12 +193,26 @@ mod winvol {
         ) -> i32;
         pub fn CloseHandle(handle: isize) -> i32;
         pub fn DeleteVolumeMountPointW(path: *const u16) -> i32;
+        pub fn SetVolumeMountPointW(mount: *const u16, volume: *const u16) -> i32;
         pub fn GetLastError() -> u32;
     }
 
     #[link(name = "mpr")]
     extern "system" {
         pub fn WNetCancelConnection2W(name: *const u16, flags: u32, force: i32) -> u32;
+        pub fn WNetAddConnection2W(resource: *const NetResource, password: *const u16, user: *const u16, flags: u32) -> u32;
+    }
+
+    #[repr(C)]
+    pub struct NetResource {
+        pub scope: u32,
+        pub kind: u32,
+        pub display: u32,
+        pub usage: u32,
+        pub local: *const u16,
+        pub remote: *const u16,
+        pub comment: *mut u16,
+        pub provider: *mut u16,
     }
 }
 
@@ -423,7 +438,7 @@ async fn list_dir(path: String) -> Result<Vec<DiskEntry>, String> {
 }
 
 fn list_dir_sync(path: &str) -> Result<Vec<DiskEntry>, String> {
-    let read = fs::read_dir(path).map_err(|err| err.to_string())?;
+    let read = fs::read_dir(path).map_err(|err| format!("Could not open this folder ({err})"))?;
     let mut out = Vec::new();
     for item in read.flatten() {
         let file_path = item.path();
@@ -431,10 +446,16 @@ fn list_dir_sync(path: &str) -> Result<Vec<DiskEntry>, String> {
         if name == "." || name == ".." {
             continue;
         }
-        let Ok(meta) = fs::symlink_metadata(&file_path) else {
-            continue;
+        let meta = match fs::symlink_metadata(&file_path).or_else(|_| fs::metadata(&file_path)) {
+            Ok(meta) => meta,
+            Err(_) => continue,
         };
-        push_entry(&mut out, name, file_path, &meta);
+        let followed = if meta.file_type().is_symlink() {
+            fs::metadata(&file_path).unwrap_or(meta)
+        } else {
+            meta
+        };
+        push_entry(&mut out, name, file_path, &followed);
     }
     out.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
     Ok(out)
@@ -528,9 +549,20 @@ fn dir_size(path: &Path, budget: &mut u32, depth: u32) -> (u64, bool) {
     let Ok(meta) = fs::symlink_metadata(path) else {
         return (0, false);
     };
-    if meta.file_type().is_symlink() || !meta.is_dir() {
+    if meta.file_type().is_symlink() {
+        return match fs::metadata(path) {
+            Ok(followed) if followed.is_dir() => walk_dir(path, budget, depth),
+            Ok(followed) => (followed.len(), true),
+            Err(_) => (0, false),
+        };
+    }
+    if !meta.is_dir() {
         return (meta.len(), true);
     }
+    walk_dir(path, budget, depth)
+}
+
+fn walk_dir(path: &Path, budget: &mut u32, depth: u32) -> (u64, bool) {
     let Ok(entries) = fs::read_dir(path) else {
         return (0, false);
     };
@@ -559,6 +591,29 @@ async fn measure_children(path: String) -> Result<Vec<Measured>, String> {
                 Err(_) => continue,
             };
             if !(meta.is_dir() && !meta.file_type().is_symlink()) {
+                if meta.file_type().is_symlink() {
+                    if let Ok(followed) = fs::metadata(entry.path()) {
+                        if followed.is_dir() {
+                            let mut budget = 25_000u32;
+                            let (bytes, complete) = dir_size(&entry.path(), &mut budget, 0);
+                            out.push(Measured {
+                                name: entry.file_name().to_string_lossy().to_string(),
+                                bytes: Some(bytes),
+                                partial: !complete,
+                                blocked: bytes == 0 && !complete,
+                            });
+                        }
+                    }
+                }
+                continue;
+            }
+            if fs::read_dir(entry.path()).is_err() {
+                out.push(Measured {
+                    name: entry.file_name().to_string_lossy().to_string(),
+                    bytes: None,
+                    partial: true,
+                    blocked: true,
+                });
                 continue;
             }
             let mut budget = 25_000u32;
@@ -568,6 +623,7 @@ async fn measure_children(path: String) -> Result<Vec<Measured>, String> {
                 name: entry.file_name().to_string_lossy().to_string(),
                 bytes: if bytes == 0 && partial { None } else { Some(bytes) },
                 partial,
+                blocked: bytes == 0 && partial,
             });
         }
         Ok(out)
@@ -695,6 +751,324 @@ fn format_drive(path: String, filesystem: String, label: String) -> Result<Strin
     }
 }
 
+#[derive(Serialize, serde::Deserialize, Clone)]
+struct SnapInfo {
+    id: String,
+    taken: u64,
+    sources: Vec<String>,
+    files: u64,
+    bytes: u64,
+    skipped: u64,
+}
+
+#[derive(Serialize)]
+struct KnownFolder {
+    name: String,
+    path: String,
+}
+
+fn snap_root() -> PathBuf {
+    let base = std::env::var("LOCALAPPDATA").unwrap_or_else(|_| std::env::temp_dir().to_string_lossy().to_string());
+    PathBuf::from(base).join("Data Finder").join("Snapshots")
+}
+
+fn copy_tree(from: &Path, to: &Path, files: &mut u64, bytes: &mut u64, skipped: &mut u64, depth: u32) {
+    if depth > 40 {
+        *skipped += 1;
+        return;
+    }
+    let Ok(meta) = fs::symlink_metadata(from) else {
+        *skipped += 1;
+        return;
+    };
+    let directory = if meta.file_type().is_symlink() {
+        fs::metadata(from).map(|item| item.is_dir()).unwrap_or(false)
+    } else {
+        meta.is_dir()
+    };
+    if directory {
+        if fs::create_dir_all(to).is_err() {
+            *skipped += 1;
+            return;
+        }
+        let Ok(entries) = fs::read_dir(from) else {
+            *skipped += 1;
+            return;
+        };
+        for entry in entries.flatten() {
+            copy_tree(&entry.path(), &to.join(entry.file_name()), files, bytes, skipped, depth + 1);
+        }
+        return;
+    }
+    if let Some(parent) = to.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    match fs::copy(from, to) {
+        Ok(len) => {
+            *files += 1;
+            *bytes += len;
+        }
+        Err(_) => *skipped += 1,
+    }
+}
+
+#[tauri::command]
+async fn snapshot_save(sources: Vec<String>) -> Result<SnapInfo, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        if sources.is_empty() {
+            return Err("Choose a folder to snapshot".into());
+        }
+        let id = format!("{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0));
+        let root = snap_root().join(&id);
+        let store = root.join("files");
+        fs::create_dir_all(&store).map_err(|err| err.to_string())?;
+        let mut files = 0u64;
+        let mut bytes = 0u64;
+        let mut skipped = 0u64;
+        let mut kept = Vec::new();
+        for (index, source) in sources.iter().enumerate() {
+            let from = PathBuf::from(source);
+            if !from.exists() {
+                skipped += 1;
+                continue;
+            }
+            if nested(&root, &from) || nested(&from, &root) {
+                return Err("A snapshot cannot copy its own storage folder".into());
+            }
+            copy_tree(&from, &store.join(index.to_string()), &mut files, &mut bytes, &mut skipped, 0);
+            kept.push(source.clone());
+        }
+        if kept.is_empty() {
+            let _ = fs::remove_dir_all(&root);
+            return Err("None of those folders could be read".into());
+        }
+        let info = SnapInfo {
+            id,
+            taken: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0),
+            sources: kept,
+            files,
+            bytes,
+            skipped,
+        };
+        fs::write(root.join("manifest.json"), serde_json::to_string_pretty(&info).map_err(|err| err.to_string())?).map_err(|err| err.to_string())?;
+        Ok(info)
+    })
+    .await
+    .map_err(|err| err.to_string())?
+}
+
+#[tauri::command]
+fn snapshot_list() -> Vec<SnapInfo> {
+    let root = snap_root();
+    let Ok(entries) = fs::read_dir(&root) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for entry in entries.flatten() {
+        let manifest = entry.path().join("manifest.json");
+        let Ok(text) = fs::read_to_string(manifest) else {
+            continue;
+        };
+        if let Ok(info) = serde_json::from_str::<SnapInfo>(&text) {
+            out.push(info);
+        }
+    }
+    out.sort_by(|a, b| b.taken.cmp(&a.taken));
+    out
+}
+
+#[tauri::command]
+async fn snapshot_restore(id: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = snap_root().join(&id);
+        let text = fs::read_to_string(root.join("manifest.json")).map_err(|_| "That snapshot was not found".to_string())?;
+        let info: SnapInfo = serde_json::from_str(&text).map_err(|err| err.to_string())?;
+        let mut restored = 0u64;
+        let mut bytes = 0u64;
+        let mut skipped = 0u64;
+        for (index, source) in info.sources.iter().enumerate() {
+            let from = root.join("files").join(index.to_string());
+            if !from.exists() {
+                skipped += 1;
+                continue;
+            }
+            copy_tree(&from, Path::new(source), &mut restored, &mut bytes, &mut skipped, 0);
+        }
+        Ok(format!("Restored {restored} file(s)"))
+    })
+    .await
+    .map_err(|err| err.to_string())?
+}
+
+#[tauri::command]
+fn snapshot_remove(id: String) -> Result<(), String> {
+    let root = snap_root().join(&id);
+    if !root.starts_with(snap_root()) {
+        return Err("That snapshot cannot be removed".into());
+    }
+    fs::remove_dir_all(root).map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+fn known_folders() -> Vec<KnownFolder> {
+    #[cfg(windows)]
+    {
+        let ids = [
+            ("Desktop", (0xB4BFCC3A, 0xDB2C, 0x424C, [0xB0, 0x29, 0x7F, 0xE9, 0x9A, 0x87, 0xC6, 0x41])),
+            ("Documents", (0xFDD39AD0, 0x238F, 0x46AF, [0xAD, 0xB4, 0x6C, 0x85, 0x48, 0x03, 0x69, 0xC7])),
+            ("Downloads", (0x374DE290, 0x123F, 0x4565, [0x91, 0x64, 0x39, 0xC4, 0x92, 0x5E, 0x46, 0x7B])),
+            ("Pictures", (0x33E28130, 0x4E1E, 0x4676, [0x83, 0x5A, 0x98, 0x39, 0x5C, 0x3B, 0xC3, 0xBB])),
+            ("Music", (0x4BD8D571, 0x6D19, 0x48D3, [0xBE, 0x97, 0x42, 0x22, 0x20, 0x08, 0x0E, 0x43])),
+            ("Videos", (0x18989B1D, 0x99B5, 0x455B, [0x84, 0x1C, 0xAB, 0x7C, 0x74, 0xE4, 0xDD, 0xFC])),
+        ];
+        let mut out = Vec::new();
+        for (name, id) in ids {
+            if let Some(path) = known_folder_path(id) {
+                if Path::new(&path).is_dir() {
+                    out.push(KnownFolder { name: name.into(), path });
+                }
+            }
+        }
+        return out;
+    }
+    #[cfg(not(windows))]
+    {
+        Vec::new()
+    }
+}
+
+#[cfg(windows)]
+fn known_folder_path(id: (u32, u16, u16, [u8; 8])) -> Option<String> {
+    #[repr(C)]
+    struct Guid {
+        d1: u32,
+        d2: u16,
+        d3: u16,
+        d4: [u8; 8],
+    }
+    #[link(name = "shell32")]
+    extern "system" {
+        fn SHGetKnownFolderPath(id: *const Guid, flags: u32, token: *mut core::ffi::c_void, path: *mut *mut u16) -> i32;
+    }
+    #[link(name = "ole32")]
+    extern "system" {
+        fn CoTaskMemFree(ptr: *mut core::ffi::c_void);
+    }
+    let guid = Guid { d1: id.0, d2: id.1, d3: id.2, d4: id.3 };
+    let mut ptr: *mut u16 = std::ptr::null_mut();
+    let hr = unsafe { SHGetKnownFolderPath(&guid, 0, std::ptr::null_mut(), &mut ptr) };
+    if hr != 0 || ptr.is_null() {
+        return None;
+    }
+    let mut len = 0usize;
+    unsafe {
+        while *ptr.add(len) != 0 {
+            len += 1;
+        }
+    }
+    let text = unsafe { String::from_utf16_lossy(std::slice::from_raw_parts(ptr, len)) };
+    unsafe { CoTaskMemFree(ptr as *mut core::ffi::c_void); }
+    if text.is_empty() { None } else { Some(text) }
+}
+
+#[tauri::command]
+fn mount_volume(path: String) -> Result<String, String> {
+    #[cfg(windows)]
+    {
+        if !path.starts_with("\\\\?\\Volume") {
+            return Err("That drive cannot be given a letter".into());
+        }
+        let volume = if path.ends_with('\\') { path.clone() } else { format!("{path}\\") };
+        let mask = unsafe { winvol::GetLogicalDrives() };
+        let mut letter = None;
+        for index in 0..26 {
+            if mask & (1 << index) == 0 {
+                letter = Some((b'A' + index) as char);
+                break;
+            }
+        }
+        let letter = letter.ok_or_else(|| "No free drive letter".to_string())?;
+        let mount = format!("{letter}:\\");
+        let ok = unsafe { winvol::SetVolumeMountPointW(wide(&mount).as_ptr(), wide(&volume).as_ptr()) };
+        if ok == 0 {
+            let code = unsafe { winvol::GetLastError() };
+            return Err(format!("Could not mount that drive ({code})"));
+        }
+        return Ok(format!("Mounted as {letter}:"));
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = path;
+        Err("Mount only works in the Windows program".into())
+    }
+}
+
+#[tauri::command]
+fn map_network(unc: String, letter: String) -> Result<String, String> {
+    #[cfg(windows)]
+    {
+        let remote = unc.trim().to_string();
+        if !remote.starts_with("\\\\") || remote.chars().any(|ch| ch.is_control()) {
+            return Err("Use a path like \\\\server\\share".into());
+        }
+        let local = letter.trim().to_string();
+        let local_wide;
+        let local_ptr: *const u16 = if local.is_empty() {
+            std::ptr::null::<u16>()
+        } else {
+            let ch = local.chars().next().filter(|item| item.is_ascii_alphabetic()).ok_or_else(|| "Choose a drive letter".to_string())?;
+            local_wide = wide(&format!("{}:", ch.to_ascii_uppercase()));
+            local_wide.as_ptr()
+        };
+        let remote_wide = wide(&remote);
+        let resource = winvol::NetResource {
+            scope: 0,
+            kind: 1,
+            display: 0,
+            usage: 0,
+            local: local_ptr,
+            remote: remote_wide.as_ptr(),
+            comment: std::ptr::null_mut(),
+            provider: std::ptr::null_mut(),
+        };
+        let code = unsafe { winvol::WNetAddConnection2W(&resource, std::ptr::null::<u16>(), std::ptr::null::<u16>(), 1) };
+        if code != 0 {
+            return Err(format!("Could not add that network place ({code})"));
+        }
+        return Ok(if local.is_empty() { format!("Added {remote}") } else { format!("Mapped {remote}") });
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (unc, letter);
+        Err("Network drives only work in the Windows program".into())
+    }
+}
+
+#[tauri::command]
+fn open_url(url: String) -> Result<(), String> {
+    if !url.starts_with("https://github.com/AxxessDenyd/Data-Finder") || url.chars().any(|ch| ch.is_control() || ch == '"') {
+        return Err("That link cannot be opened".into());
+    }
+    #[cfg(windows)]
+    {
+        #[link(name = "shell32")]
+        extern "system" {
+            fn ShellExecuteW(hwnd: isize, op: *const u16, file: *const u16, params: *const u16, dir: *const u16, show: i32) -> isize;
+        }
+        let code = unsafe {
+            ShellExecuteW(0, wide("open").as_ptr(), wide(&url).as_ptr(), std::ptr::null::<u16>(), std::ptr::null::<u16>(), 1)
+        };
+        if code <= 32 {
+            return Err("Could not open that link".into());
+        }
+        return Ok(());
+    }
+    #[cfg(not(windows))]
+    {
+        Err("Open the project page from a browser".into())
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -710,7 +1084,15 @@ pub fn run() {
             measure_children,
             unmount_drive,
             mount_image,
-            format_drive
+            format_drive,
+            mount_volume,
+            map_network,
+            open_url,
+            known_folders,
+            snapshot_save,
+            snapshot_list,
+            snapshot_restore,
+            snapshot_remove
         ])
         .run(tauri::generate_context!())
         .expect("Data Finder failed to start");

@@ -9,8 +9,8 @@ export const aboutInfo = {
   name: "Data Finder",
   created: "October 2026",
   author: "William Schneider",
-  updated: "October 18, 2026",
-  version: "0.1.0",
+  updated: "October 19, 2026",
+  version: "0.2.0",
   latest: "https://github.com/AxxessDenyd/Data-Finder",
   setup: "https://github.com/AxxessDenyd/Data-Finder/raw/main/Data-Finder-Setup.exe",
   portable: "https://github.com/AxxessDenyd/Data-Finder/raw/main/Data-Finder.exe",
@@ -40,13 +40,14 @@ export const manualSections: ManualSection[] = [
   {
     title: "The window",
     items: [
-      "The app opens in one pane. The folder tree is on the left and the file list is on the right.",
-      "Help has Manual, About, and a search box. Search narrows the manual to the matching sections.",
+      "The folder tree starts with Pinned and Recent. Desktop, Documents, Downloads, Pictures, Music, and Videos are pinned the first time the program runs. Pin on the right-click menu adds the folder you have open.",
+      "The search box at the top right filters the folder you have open. Refresh sits next to the path. Check boxes sit beside each name.",
+      "Home menus are New, Edit, Go, Drives, View, Filter, Details, Shortcuts, and Layout. A second bar has Cut, Copy, Paste, Rename, Delete, Sort, and View.",
       "New creates a folder or a file. The list includes a text document, markdown, spreadsheet, web page, JSON, settings, PowerShell, batch, log, and an empty file. If the name is already there, a number is added.",
       "Filter sorts by name, size, date, or type. Click the same sort again to reverse it. It can also show folders, files, documents, pictures, music, videos, programs, archives, or items of 100 MB and up, and limit them to today, the past week, or the past month.",
       "Drag across empty space, or across items that are not already selected, to draw a box and select every file and folder inside it. Drag an item that is already selected to move it.",
       "The address bar shows the path. Click it to type a path such as C:\\Users.",
-      "The bottom bar shows how many items are selected, a Details button, and the drive name, mount state, and free space.",
+      "The bottom bar shows how many items are selected, a Details button, and the drive's free space. A drive you can see is mounted.",
       "Select one or more files and folders, then open Details. Each item is listed with its type and size. Each folder also lists what is inside it, grouped by type. The top line adds every selected size into one total.",
     ],
   },
@@ -54,9 +55,9 @@ export const manualSections: ManualSection[] = [
     title: "Home menus",
     items: [
       "New: folder and the file types Data Finder can create.",
-      "Hold: Cut, Copy, and Paste.",
       "Edit: Open, Delete, Rename, Undo, New folder, and New file.",
       "Go: Up, This computer, Unmount, Format, Refresh, Measure, and the size-bar style.",
+      "Drives: show every drive, mount a drive that is waiting for a letter, map a network drive, add a network location, and disconnect a network drive.",
       "View: icon sizes, List, Details, Tiles, Content, the details pane, the preview pane, and the Show list.",
       "Filter: sort order, file kind, and how recently an item changed.",
       "Details: how many items are selected, Show details, Copy location, and Info.",
@@ -89,11 +90,9 @@ export const manualSections: ManualSection[] = [
   {
     title: "Drives",
     items: [
-      "This computer lists each drive as a letter and a name, such as C:\\ [Local Disk], plus whether it is mounted.",
-      "Right-click a drive for Unmount or Format. The Windows drive does not offer those, because Windows is running from it.",
-      "Unmount closes the volume. A removable drive is ejected.",
-      "Format erases an extra drive. Confirm the drive, pick NTFS, exFAT, or FAT32, and a name. The Windows drive cannot be formatted.",
-      "Right-click an ISO file and choose Mount image. Windows mounts it as a drive. Refresh if the new letter is slow to appear.",
+      "This computer lists each drive as a letter and a name, such as C:\\ [Local Disk]. A drive you can see is mounted. Drives that are not mounted stay off the list unless Show every drive is checked.",
+      "Drives that can be given a letter appear in the Drives menu. Mount assigns the next free letter. An empty optical drive is not listed there, because there is nothing to mount.",
+      "Map network drive connects \\\\server\\share to a letter. Add network location connects the share without a letter. Disconnect closes a network drive. The Windows drive cannot be unmounted or formatted.",
     ],
   },
   {
@@ -103,7 +102,7 @@ export const manualSections: ManualSection[] = [
       "Drag a row onto a folder or the other pane to move it. Hold Ctrl while you drop to copy.",
       "Paste asks when the name is already there: keep both, rename the old file, overwrite, update newer files, or skip.",
       "Right-click for Open, Cut, Copy, Paste, Rename, Delete, New folder, New file, Copy location, Info, Pin, Refresh, and Save snapshot. The menu stays on the screen.",
-      "Folder sizes are measured for the folders in view. A plus sign means the walk stopped early and the size is partial. Measure on the Go menu runs it again.",
+      "If a folder cannot be opened, the list says why and Try again reads it once more. A folder that cannot be measured says No access. Shortcuts to folders are opened as folders.",
       "Ctrl+Z undoes the last change in the practice catalog. Changes on a real disk are not undone.",
     ],
   },
@@ -112,8 +111,7 @@ export const manualSections: ManualSection[] = [
     items: [
       "Find narrows the current folder by name, size, type, or date. Pattern selects names such as *.sys or files over 100 MB and leaves the rest of the folder on screen.",
       "Deep search looks through a folder or the whole computer. Jump to path opens a typed path.",
-      "Analyze keeps snapshots. The practice copies are C:, Users, Downloads, and Program Files. Open one to see that saved list. Bring back copies missing names into the practice catalog only. Those copies are not written onto a real disk.",
-      "Save snapshot stores the folder you have open. Bring back restores missing names in that folder, including on a real drive.",
+      "Snapshots copies the real files into a Data Finder folder on this PC, so a deleted file can be restored. The Snapshots window lists each copy, what it captured, and how much space it uses. User folders copies Desktop, Documents, Downloads, Pictures, Music, and Videos. That can use a lot of disk space, so the program asks first.",
     ],
   },
   {

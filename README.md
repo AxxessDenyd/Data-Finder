@@ -15,7 +15,15 @@ The same guide is inside the program. Open the Help tab, then Manual. Search the
 
 The program opens in one pane. The folder tree is on the left and the file list is on the right. Home, Find, Analyze, View, and Help are the tabs.
 
-Home is one row of menus: New, Hold, Edit, Go, View, Filter, Details, Shortcuts, and Layout. Click a name and the list opens over the window.
+Home is one row of menus: New, Edit, Go, Drives, View, Filter, Details, Shortcuts, and Layout. Under that is a bar for Cut, Copy, Paste, Rename, Delete, Sort, and View.
+
+The search box at the top right filters the open folder. Refresh sits next to the path. Check boxes sit beside each name. Pinned and Recent are at the top of the folder tree. Desktop, Documents, Downloads, Pictures, Music, and Videos start pinned.
+
+Drives you can see are mounted. Show every drive, in the Drives menu, lists the rest. That menu also mounts a drive that is waiting for a letter, maps a network drive, adds a network location, and disconnects a network drive.
+
+A snapshot copies the real files onto this PC so they can be restored. The Snapshots window lists each copy. User folders can copy Desktop, Documents, Downloads, Pictures, Music, and Videos, and it asks first because that can use a lot of space.
+
+About links open in the browser.
 
 New creates a folder or a file of a chosen type: text, markdown, spreadsheet, web page, JSON, settings, PowerShell, batch, log, or an empty file.
 
@@ -30,9 +38,9 @@ Select several files and folders, then open Details. Each item is listed with it
 ## Home menus
 
 - **New:** a folder or a file of a chosen type.
-- **Hold:** Cut, Copy, and Paste.
 - **Edit:** Open, Delete, Rename, Undo, New folder, and New file.
 - **Go:** Up, This computer, Unmount, Format, Refresh, Measure, and the size-bar style.
+- **Drives:** show every drive, mount a waiting drive, map a network drive, add a network location, and disconnect.
 - **View:** icon sizes, List, Details, Tiles, Content, the details pane, the preview pane, and the Show list.
 - **Filter:** sort order, file kind, and how recently an item changed.
 - **Details:** the selection summary, Show details, Copy location, and Info.

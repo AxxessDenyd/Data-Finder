@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { diskCreate, diskPath, diskRemoveNamed, diskRename, diskTransfer, fetchDrives, forgetDisk, formatVolume, isDesktop, isDiskId, loadChildren, loadDesktopComputer, measureChildren, mountImage, pickFolder, readDiskText, setDiskPath, unmountVolume, type DiskJob } from "@/lib/disk";
+import { diskCreate, diskPath, diskRemoveNamed, diskRename, diskTransfer, fetchDrives, forgetDisk, formatVolume, isDesktop, isDiskId, knownFolders, listSnapshots, loadChildren, loadDesktopComputer, mapNetwork, measureChildren, mountImage, mountVolume, pickFolder, readDiskText, removeSnapshot, restoreSnapshot, saveSnapshot, setDiskPath, unmountVolume, type DiskJob, type DiskSnapshot } from "@/lib/disk";
 import {
   childrenOf,
   cloneSubtree,
@@ -99,7 +99,10 @@ export type DialogState =
   | { kind: "mask" }
   | { kind: "restore" }
   | { kind: "unmount"; id: string }
-  | { kind: "format"; id: string };
+  | { kind: "format"; id: string }
+  | { kind: "network"; location: boolean }
+  | { kind: "snaps" }
+  | { kind: "snap-user" };
 
 export interface SearchRequest {
   query?: string;
@@ -124,6 +127,7 @@ export interface PaneModel {
   sortDir: "asc" | "desc";
   query: string;
   flat: boolean;
+  notice?: string;
 }
 
 export type ViewMode = "xlarge" | "large" | "medium" | "small" | "list" | "details" | "tiles" | "content";
@@ -196,6 +200,7 @@ export interface ListRow {
   system: boolean;
   kind: FsNode["kind"];
   approx?: boolean;
+  blocked?: boolean;
   nodeId?: string;
   path?: string;
   note?: string;
@@ -260,6 +265,9 @@ interface FileState extends FsSnapshot {
   uiRev: number;
   helpPage: "manual" | "about";
   helpQuery: string;
+  showAllDrives: boolean;
+  pins: string[];
+  recentPaths: string[];
   readerId: string | null;
 }
 
@@ -351,6 +359,9 @@ export interface UiPrefs {
   showExt?: boolean;
   previewOpen?: boolean;
   snaps?: Array<ShadowCopy & { path: string }>;
+  pins?: string[];
+  recentPaths?: string[];
+  showAllDrives?: boolean;
   uiRev?: number;
   sort?: [{ key: SortKey; dir: "asc" | "desc" }, { key: SortKey; dir: "asc" | "desc" }];
 }
@@ -366,6 +377,10 @@ interface Actions {
   setTab: (tab: RibbonTab) => void;
   setHelpPage: (page: "manual" | "about") => void;
   setHelpQuery: (query: string) => void;
+  setShowAllDrives: (on: boolean) => void;
+  rememberPath: (path: string) => void;
+  reloadDrives: () => Promise<void>;
+  saveUserSnapshot: () => Promise<void>;
   toggleSplit: () => void;
   toggleDiff: () => void;
   toggleDupes: () => void;
@@ -754,6 +769,9 @@ export const useFiles = create<FileState & Actions>((set, get) => ({
   uiRev: 3,
   helpPage: "manual",
   helpQuery: "",
+  showAllDrives: false,
+  pins: [],
+  recentPaths: [],
   snaps: [],
   readerId: null,
 
@@ -761,6 +779,32 @@ export const useFiles = create<FileState & Actions>((set, get) => ({
   setTab: (tab) => set({ tab }),
   setHelpPage: (helpPage) => set({ helpPage }),
   setHelpQuery: (helpQuery) => set({ helpQuery, helpPage: "manual" }),
+  setShowAllDrives: (showAllDrives) => set({ showAllDrives, status: showAllDrives ? "Showing every drive" : "Showing mounted drives" }),
+  rememberPath: (path) =>
+    set((state) => ({
+      recentPaths: [path, ...state.recentPaths.filter((item) => item.toLowerCase() !== path.toLowerCase())].slice(0, 12),
+    })),
+  reloadDrives: async () => {
+    try {
+      await applyFreshDrives("Drives updated");
+    } catch (error) {
+      set({ status: error instanceof Error ? error.message : "Could not refresh drives" });
+    }
+  },
+  saveUserSnapshot: async () => {
+    const folders = get().pins.length ? get().pins : (await knownFolders()).map((folder) => folder.path);
+    if (!folders.length) {
+      set({ status: "No user folders were found", dialog: null });
+      return;
+    }
+    set({ status: "Copying user folders into a snapshot. This can take a while.", dialog: null });
+    try {
+      const info = await saveSnapshot(folders);
+      set({ status: `User snapshot saved · ${info.files} file(s) · ${formatSize(info.bytes)}`, dialog: { kind: "snaps" } });
+    } catch (error) {
+      set({ status: error instanceof Error ? error.message : "Could not save that snapshot" });
+    }
+  },
   toggleSplit: () =>
     set((state) => {
       const split = !state.split;
@@ -818,7 +862,12 @@ export const useFiles = create<FileState & Actions>((set, get) => ({
           get().navigate(index, id, push);
         })
         .catch((error: unknown) => {
-          set({ status: error instanceof Error ? error.message : "Could not read that folder" });
+          const message = error instanceof Error ? error.message : "Could not read that folder";
+          set((state) => {
+            const panes = [...state.panes] as [PaneModel, PaneModel];
+            panes[index] = { ...panes[index], notice: message };
+            return { panes, status: message };
+          });
         });
       return;
     }
@@ -832,6 +881,7 @@ export const useFiles = create<FileState & Actions>((set, get) => ({
         anchor: null,
         back: push && current.pathId !== id ? [...current.back, current.pathId].slice(-50) : current.back,
         forward: push ? [] : current.forward,
+        notice: "",
       };
       return {
         panes,
@@ -844,6 +894,8 @@ export const useFiles = create<FileState & Actions>((set, get) => ({
         status: displayPath(state, id),
       };
     });
+    const opened = diskPath(id);
+    if (opened) get().rememberPath(opened);
     if (get().calcDirs) void get().calcSizes(index);
   },
 
@@ -1545,7 +1597,7 @@ export const useFiles = create<FileState & Actions>((set, get) => ({
                 complete = false;
                 continue;
               }
-              nodes[id] = { ...node, bytes: measured.bytes, approx: measured.partial };
+              nodes[id] = { ...node, bytes: measured.blocked ? null : measured.bytes, approx: measured.partial, blocked: measured.blocked };
               sum += measured.bytes;
               if (measured.partial) complete = false;
             }
@@ -1581,6 +1633,8 @@ export const useFiles = create<FileState & Actions>((set, get) => ({
       return;
     }
     if (isDiskId(node.id)) {
+      const opened = diskPath(node.id);
+      if (opened) get().rememberPath(opened);
       void readDiskText(node.id, node.name)
         .then((text) => {
           set({
@@ -1789,6 +1843,16 @@ export const useFiles = create<FileState & Actions>((set, get) => ({
     const node = state.nodes[folderId];
     if (!node || node.kind === "file" || node.kind === "computer") {
       set({ status: "Open a folder, then save a snapshot" });
+      return;
+    }
+    const source = diskPath(folderId);
+    if (source && isDesktop()) {
+      set({ status: `Copying ${node.name} into a snapshot` });
+      void saveSnapshot([source])
+        .then((info) => {
+          set({ status: `Snapshot saved · ${info.files} file(s) · ${formatSize(info.bytes)}`, dialog: { kind: "snaps" } });
+        })
+        .catch((error: unknown) => set({ status: error instanceof Error ? error.message : "Could not save that snapshot" }));
       return;
     }
     if (!state.order[folderId]) {
@@ -2181,7 +2245,9 @@ export const useFiles = create<FileState & Actions>((set, get) => ({
       try {
         set({ status: "Reading this computer" });
         const tree = await loadDesktopComputer();
-        set({ nodes: tree.nodes, order: tree.order, undoStack: [], clipboard: null, status: "This computer" });
+        const folders = await knownFolders();
+        const pins = get().pins.length ? get().pins : folders.map((folder) => folder.path);
+        set({ nodes: tree.nodes, order: tree.order, undoStack: [], clipboard: null, pins, status: "This computer" });
         get().navigate(pane, tree.openId, false);
       } catch (error) {
         set({ status: error instanceof Error ? error.message : "Could not read this computer" });
@@ -2294,11 +2360,14 @@ export const useFiles = create<FileState & Actions>((set, get) => ({
         viewMode: prefs.viewMode ?? state.viewMode,
         showNav: prefs.showNav ?? state.showNav,
         compact: prefs.compact ?? state.compact,
-        itemChecks: prefs.itemChecks ?? state.itemChecks,
+        itemChecks: (prefs.uiRev ?? 0) < 4 ? true : (prefs.itemChecks ?? state.itemChecks),
         showExt: prefs.showExt ?? state.showExt,
         previewOpen: prefs.previewOpen ?? state.previewOpen,
         snaps: prefs.snaps ?? state.snaps,
-        uiRev: 3,
+        pins: prefs.pins ?? state.pins,
+        recentPaths: prefs.recentPaths ?? state.recentPaths,
+        showAllDrives: prefs.showAllDrives ?? false,
+        uiRev: 4,
         nodes,
         order,
         seq,
@@ -2564,11 +2633,18 @@ export function listing(state: FileState, index: 0 | 1): { rows: ListRow[]; bann
         kind: node.kind,
         path: path || undefined,
         note: node.note,
+        blocked: node.blocked,
       };
     });
     if (flat) {
       const folder = state.nodes[paneState.pathId]?.name ?? "folder";
       banner = `All files · ${total} file${total === 1 ? "" : "s"} under ${folder}`;
+    }
+    if (!state.showAllDrives) {
+      rows = rows.filter((row) => {
+        if (row.kind !== "drive" || !row.nodeId) return true;
+        return state.nodes[row.nodeId]?.mounted !== false;
+      });
     }
     if (state.diff && state.split) {
       const other = index === 0 ? 1 : 0;

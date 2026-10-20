@@ -73,7 +73,7 @@ import {
   type ViewMode,
 } from "@/lib/file-store";
 import { childrenOf, driveCaption, formatDate, formatSize, pathIds, resolvePath, typeLabel, type FsNode } from "@/lib/vfs";
-import { diskPath, isDesktop, isDiskId, withoutDisk } from "@/lib/disk";
+import { diskPath, isDesktop, isDiskId, listSnapshots, mapNetwork, mountVolume, openExternal, removeSnapshot, restoreSnapshot, withoutDisk, type DiskSnapshot } from "@/lib/disk";
 import { aboutInfo, manualSections } from "@/lib/manual";
 
 const UI_KEY = "data-finder-ui";
@@ -81,7 +81,8 @@ const CATALOG_KEY = "data-finder-catalog";
 const MB = 1024 * 1024;
 const NO_CHILDREN: string[] = [];
 
-function shownSize(bytes: number | null | undefined, approx?: boolean) {
+function shownSize(bytes: number | null | undefined, approx?: boolean, blocked?: boolean) {
+  if (blocked) return "No access";
   const text = formatSize(bytes);
   if (!text) return "";
   return approx ? `${text}+` : text;
@@ -502,6 +503,7 @@ function Ribbon() {
   return (
     <div className="shrink-0 border-b border-ribbon-edge bg-ribbon">
       {tab === "home" && <HomeRibbon />}
+      {tab === "home" && <ActionRibbon />}
       {tab === "inspect" && <InspectRibbon />}
       {tab === "tools" && <ToolsRibbon />}
       {tab === "options" && <OptionsRibbon />}
@@ -523,6 +525,79 @@ function freshName(base: string) {
   let n = 2;
   while (names.has(`${stem} (${n})${ext}`.toLowerCase())) n += 1;
   return `${stem} (${n})${ext}`;
+}
+
+function DriveMenu() {
+  const nodes = useFiles((s) => s.nodes);
+  const order = useFiles((s) => s.order);
+  const showAll = useFiles((s) => s.showAllDrives);
+  const pathId = useFiles((s) => s.panes[s.active].pathId);
+  const drive = driveOf({ nodes, order }, pathId);
+  const waiting = (order.pc ?? [])
+    .map((id) => nodes[id])
+    .filter((node) => node?.kind === "drive" && node.mounted === false && !node.name.endsWith(":"));
+  const store = useFiles.getState;
+  return (
+    <SectionMenu label="Drives">
+      <MenuAction label={`${showAll ? "✓ " : ""}Show every drive`} icon={<HardDrive className="size-4" />} onClick={() => store().setShowAllDrives(!showAll)} />
+      <div className="my-1 h-px bg-line" />
+      {waiting.length === 0 && <p className="px-2 py-1 text-xs text-muted">No drives are waiting for a letter</p>}
+      {waiting.map((node) => (
+        <MenuAction
+          key={node.id}
+          label={`Mount ${driveCaption(node)}`}
+          icon={<HardDrive className="size-4" />}
+          onClick={() => {
+            const path = diskPath(node.id);
+            if (!path) return;
+            void mountVolume(path).then(() => store().reloadDrives()).catch((error: unknown) => store().openDialog({ kind: "preview", title: "Mount", body: error instanceof Error ? error.message : "Could not mount that drive" }));
+          }}
+        />
+      ))}
+      <div className="my-1 h-px bg-line" />
+      <MenuAction label="Map network drive" icon={<HardDrive className="size-4" />} onClick={() => store().openDialog({ kind: "network", location: false })} />
+      <MenuAction label="Add network location" icon={<FolderPlus className="size-4" />} onClick={() => store().openDialog({ kind: "network", location: true })} />
+      <MenuAction label="Disconnect" disabled={!drive || drive.note !== "Network Drive"} icon={<Unplug className="size-4" />} onClick={() => drive && store().openDialog({ kind: "unmount", id: drive.id })} />
+    </SectionMenu>
+  );
+}
+
+function SortMenu() {
+  const active = useFiles((s) => s.active);
+  const sortKey = useFiles((s) => s.panes[s.active].sortKey);
+  const sortDir = useFiles((s) => s.panes[s.active].sortDir);
+  const sort = (key: "name" | "size" | "date" | "type", label: string) => (
+    <MenuAction label={`${sortKey === key ? "✓ " : ""}${label}${sortKey === key ? (sortDir === "asc" ? " ↑" : " ↓") : ""}`} onClick={() => useFiles.getState().setSort(active, key)} />
+  );
+  return (
+    <SectionMenu label="Sort">
+      {sort("name", "Name")}
+      {sort("size", "Size")}
+      {sort("date", "Date modified")}
+      {sort("type", "Type")}
+    </SectionMenu>
+  );
+}
+
+function ActionRibbon() {
+  const active = useFiles((s) => s.active);
+  const selected = useFiles((s) => s.panes[s.active].selected);
+  const nodes = useFiles((s) => s.nodes);
+  const store = useFiles.getState;
+  return (
+    <div className="flex flex-wrap items-center gap-1 border-t border-ribbon-edge px-2 py-1">
+      <RibbonButton label="Cut" disabled={!selected.length} icon={<Scissors className="size-4" />} onClick={() => store().cut()} />
+      <RibbonButton label="Copy" disabled={!selected.length} icon={<Copy className="size-4" />} onClick={() => store().copy()} />
+      <RibbonButton label="Paste" icon={<ClipboardPaste className="size-4" />} onClick={() => store().paste()} />
+      <RibbonButton label="Rename" disabled={selected.length !== 1} icon={<Pencil className="size-4" />} onClick={() => {
+        const node = nodes[selected[0]];
+        if (node) store().openDialog({ kind: "rename", id: node.id, name: node.name });
+      }} />
+      <RibbonButton label="Delete" disabled={!selected.length} icon={<Trash2 className="size-4" />} onClick={() => selected.length && store().openDialog({ kind: "delete", ids: selected })} />
+      <SortMenu />
+      <ViewMenu />
+    </div>
+  );
 }
 
 function FilterMenu() {
@@ -606,11 +681,6 @@ function HomeRibbon() {
         <MenuAction label="Log" icon={<FileText className="size-4" />} onClick={() => store().newItem(freshName("Log.log"), true)} />
         <MenuAction label="Empty file" icon={<FilePlus className="size-4" />} onClick={() => store().newItem(freshName("New file"), true)} />
       </SectionMenu>
-      <SectionMenu label="Hold">
-        <MenuAction label="Cut" disabled={!selected.length} icon={<Scissors className="size-4" />} onClick={() => store().cut()} />
-        <MenuAction label="Copy" disabled={!selected.length} icon={<Copy className="size-4" />} onClick={() => store().copy()} />
-        <MenuAction label="Paste" icon={<ClipboardPaste className="size-4" />} onClick={() => store().paste()} />
-      </SectionMenu>
       <SectionMenu label="Edit">
         <MenuAction label="Open" disabled={!selected.length} icon={<File className="size-4" />} onClick={() => selected[0] && store().openItem(active, selected[0])} />
         <MenuAction label="Delete" disabled={!selected.length} icon={<Trash2 className="size-4" />} onClick={() => selected.length && store().openDialog({ kind: "delete", ids: selected })} />
@@ -635,6 +705,7 @@ function HomeRibbon() {
         <MenuAction label="Measure" icon={<Ruler className="size-4" />} onClick={() => void store().calcSizes()} />
         <MenuAction label={barMode === "log" ? "Compressed bars" : "Even bars"} icon={<Scale className="size-4" />} onClick={() => store().toggleBarMode()} />
       </SectionMenu>
+      <DriveMenu />
       <ViewMenu />
       <FilterMenu />
       <SectionMenu label="Details">
@@ -791,6 +862,8 @@ function ToolsRibbon() {
       </GroupBox>
       <GroupBox title="Snapshots">
         <RibbonButton label="Save snapshot" icon={<History className="size-4" />} onClick={() => useFiles.getState().takeSnapshot()} />
+        <RibbonButton label="Snapshots" icon={<History className="size-4" />} onClick={() => useFiles.getState().openDialog({ kind: "snaps" })} />
+        <RibbonButton label="User folders" icon={<Folder className="size-4" />} onClick={() => useFiles.getState().openDialog({ kind: "snap-user" })} />
         {shadows.map((item) => (
           <RibbonButton key={item.id} label={`${labels[item.folderId] ?? "Folder"} · ${new Date(item.taken).toLocaleDateString()}`} icon={<History className="size-4" />} active={shadowId === item.id} onClick={() => useFiles.getState().openShadow(active, item.id)} />
         ))}
@@ -919,7 +992,7 @@ function ManualPage() {
                 <ul className="mt-2 space-y-1 text-sm">
                   {section.links.map((link) => (
                     <li key={link.href}>
-                      <a href={link.href} target="_blank" rel="noreferrer" className="text-accent underline">{link.label}</a>
+                      <a href={link.href} className="text-accent underline" onClick={(event) => { event.preventDefault(); void openExternal(link.href); }}>{link.label}</a>
                     </li>
                   ))}
                 </ul>
@@ -944,9 +1017,9 @@ function AboutPage() {
         <div>
           <dt className="text-muted">Latest version</dt>
           <dd className="mt-1 space-y-1">
-            <a href={aboutInfo.latest} target="_blank" rel="noreferrer" className="block text-accent underline">Project page</a>
-            <a href={aboutInfo.setup} target="_blank" rel="noreferrer" className="block text-accent underline">Data-Finder-Setup.exe</a>
-            <a href={aboutInfo.portable} target="_blank" rel="noreferrer" className="block text-accent underline">Data-Finder.exe</a>
+            <button type="button" className="block text-accent underline" onClick={() => void openExternal(aboutInfo.latest)}>Project page</button>
+            <button type="button" className="block text-accent underline" onClick={() => void openExternal(aboutInfo.setup)}>Data-Finder-Setup.exe</button>
+            <button type="button" className="block text-accent underline" onClick={() => void openExternal(aboutInfo.portable)}>Data-Finder.exe</button>
           </dd>
         </div>
       </dl>
@@ -988,12 +1061,38 @@ async function copyListing() {
   state.openDialog({ kind: "preview", title: "Folder list", body });
 }
 
+function NavPlaces({ pane }: { pane: 0 | 1 }) {
+  const pins = useFiles((s) => s.pins);
+  const recent = useFiles((s) => s.recentPaths);
+  const open = (path: string) => void useFiles.getState().openTypedPath(path);
+  const block = (title: string, paths: string[]) => (
+    <div className="border-b border-line py-1">
+      <p className="px-2 py-1 text-[11px] font-semibold text-muted">{title}</p>
+      {paths.length === 0 && <p className="px-2 pb-1 text-xs text-muted">None yet</p>}
+      {paths.map((path) => (
+        <button key={path} type="button" className="flex w-full items-center gap-1 px-2 py-1 text-left text-sm hover:bg-select" title={path} onClick={() => open(path)}>
+          <Folder className="size-3.5 shrink-0 text-muted" />
+          <span className="truncate">{path.split(/[/\\]/).filter(Boolean).pop() || path}</span>
+        </button>
+      ))}
+    </div>
+  );
+  return (
+    <>
+      {block("Pinned", pins)}
+      {block("Recent", recent.slice(0, 8))}
+      <TreeBranch id="pc" depth={0} pane={pane} />
+    </>
+  );
+}
+
 function TreeBranch({ id, depth, pane }: { id: string; depth: number; pane: 0 | 1 }) {
   const node = useFiles((s) => s.nodes[id]);
   const childIds = useFiles((s) => s.order[id]) ?? NO_CHILDREN;
   const nodes = useFiles((s) => s.nodes);
   const pathId = useFiles((s) => s.panes[pane].pathId);
   const filters = useFiles((s) => s.filters);
+  const showAll = useFiles((s) => s.showAllDrives);
   const reading = useFiles((s) => s.reading);
   const [open, setOpen] = useState(depth < 1 || id === "c");
   const inPath = pathIds({ nodes, order: {} }, pathId).includes(id);
@@ -1003,9 +1102,9 @@ function TreeBranch({ id, depth, pane }: { id: string; depth: number; pane: 0 | 
   if (!node) return null;
   const folders = childIds
     .map((cid) => nodes[cid])
-    .filter((item) => item && item.kind !== "file" && flagVisible(item, filters));
+    .filter((item) => item && item.kind !== "file" && flagVisible(item, filters) && (showAll || item.kind !== "drive" || item.mounted !== false));
   const here = pathId === id;
-  const label = node.kind === "drive" ? `${driveCaption(node)} · ${node.mounted === false ? "Not mounted" : "Mounted"}` : node.name;
+  const label = node.kind === "drive" ? driveCaption(node) : node.name;
   return (
     <div>
       <button
@@ -1178,6 +1277,7 @@ function PaneView({ index }: { index: 0 | 1 }) {
         <IconButton label="Back" disabled={!pane.back.length} onClick={() => useFiles.getState().goBack(index)}><ChevronLeft className="size-4" /></IconButton>
         <IconButton label="Forward" disabled={!pane.forward.length} onClick={() => useFiles.getState().goForward(index)}><ChevronRight className="size-4" /></IconButton>
         <IconButton label="Up" onClick={() => useFiles.getState().goUp(index)}><ArrowUp className="size-4" /></IconButton>
+        <IconButton label="Refresh" onClick={() => useFiles.getState().refresh(index)}><RefreshCw className="size-4" /></IconButton>
         <button type="button" className="min-h-11 px-2 text-sm sm:hidden" onClick={() => setPlaces((v) => !v)}>Folders</button>
         {editing ? (
           <form
@@ -1259,7 +1359,7 @@ function PaneView({ index }: { index: 0 | 1 }) {
         }}
       >
         <aside className={!state.showNav ? "hidden" : (places ? "absolute inset-0 z-10 w-full " : "hidden ") + "overflow-auto border-r border-line bg-tree sm:static sm:block sm:w-56 sm:shrink-0"}>
-          <TreeBranch id="pc" depth={0} pane={index} />
+          <NavPlaces pane={index} />
         </aside>
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <div
@@ -1307,6 +1407,12 @@ function PaneView({ index }: { index: 0 | 1 }) {
           }}
         >
           {band && <div className="pointer-events-none fixed z-50 border border-accent bg-accent/20" style={{ left: band.x, top: band.y, width: band.w, height: band.h }} />}
+          {pane.notice && (
+            <div className="flex items-center justify-between gap-2 border-b border-line bg-header px-3 py-2 text-sm">
+              <span>{pane.notice}</span>
+              <button type="button" className="rounded-md px-2 py-1 hover:bg-select" onClick={() => useFiles.getState().refresh(index)}>Try again</button>
+            </div>
+          )}
           {state.viewMode === "details" ? (
           <table
             className={"table-fixed border-collapse text-left " + (state.reading ? "text-base" : "text-sm")}
@@ -1415,8 +1521,8 @@ function PaneView({ index }: { index: 0 | 1 }) {
                         </span>
                       </span>
                     </td>
-                    <td className="overflow-hidden px-2 py-1" style={columnBox(cols.size)} title={shownSize(row.bytes, row.approx) || "Not measured"}>
-                      <span className="block truncate tabular-nums">{shownSize(row.bytes, row.approx)}</span>
+                    <td className="overflow-hidden px-2 py-1" style={columnBox(cols.size)} title={shownSize(row.bytes, row.approx, row.blocked) || "Not measured"}>
+                      <span className="block truncate tabular-nums">{shownSize(row.bytes, row.approx, row.blocked)}</span>
                     </td>
                     <td className="overflow-hidden px-2 py-1" style={columnBox(cols.viz)}>
                       <div className="h-3 w-full overflow-hidden bg-bar-track" title={shownSize(row.bytes, row.approx) || "Not measured"}>
@@ -1476,7 +1582,7 @@ function PaneView({ index }: { index: 0 | 1 }) {
         {drive && (
           <span className="flex shrink-0 items-center gap-2">
             <span className="tabular-nums">
-              {drive.name.endsWith(":") ? driveCaption(drive) : drive.name}\ {drive.mounted === false ? "Not mounted" : `Mounted${drive.capacity ? ` · ${formatSize(drive.capacity)} (${freePct}% Free)` : ""}`}
+              {drive.name.endsWith(":") ? driveCaption(drive) : drive.name}{drive.mounted !== false && drive.capacity ? ` · ${formatSize(drive.capacity)} (${freePct}% free)` : ""}
             </span>
             {drive.mounted !== false && !!drive.capacity && (
               <span className="h-3 w-28 overflow-hidden border border-line bg-pane">
@@ -1600,7 +1706,7 @@ function DetailsStrip({ index, compact = false, className = "" }: { index: 0 | 1
       {items.length === 1 && (
         <>
           <div className="flex flex-wrap gap-x-3">
-            {node.kind === "drive" && <span>{node.mounted === false ? "Not mounted" : "Mounted"}</span>}
+            {node.kind === "drive" && node.mounted === false && <span>No letter</span>}
             <span className="text-muted">{flags}</span>
           </div>
           <div className="break-all text-muted" title={place}>{place}</div>
@@ -1996,6 +2102,89 @@ function OperationDialog() {
   );
 }
 
+function NetworkDialog({ location }: { location: boolean }) {
+  const [path, setPath] = useState("\\\\");
+  const [letter, setLetter] = useState(location ? "" : "Z");
+  return (
+    <form
+      onSubmit={(event) => {
+        event.preventDefault();
+        void mapNetwork(path.trim(), location ? "" : letter.trim())
+          .then((message) => {
+            useFiles.getState().openDialog(null);
+            useFiles.setState({ status: message });
+            void useFiles.getState().reloadDrives();
+          })
+          .catch((error: unknown) => useFiles.setState({ status: error instanceof Error ? error.message : "Could not add that network place" }));
+      }}
+    >
+      <h2 className="text-base font-semibold">{location ? "Add a network location" : "Map a network drive"}</h2>
+      <p className="mt-1 text-sm text-muted">Use a path like \\server\share.</p>
+      <input autoFocus value={path} onChange={(e) => setPath(e.target.value)} aria-label="Network path" className="mt-3 h-11 w-full border border-line px-2 text-sm outline-none" />
+      {!location && (
+        <label className="mt-3 flex items-center gap-2 text-sm">
+          Letter
+          <input value={letter} onChange={(e) => setLetter(e.target.value.slice(0, 1))} aria-label="Drive letter" className="h-9 w-16 border border-line px-2 outline-none" />
+        </label>
+      )}
+      <div className="mt-3 flex justify-end gap-2">
+        <button type="button" className="min-h-11 px-3" onClick={() => useFiles.getState().openDialog(null)}>Cancel</button>
+        <button type="submit" className="min-h-11 bg-accent px-3 text-accent-ink">{location ? "Add" : "Map"}</button>
+      </div>
+    </form>
+  );
+}
+
+function SnapshotWindow() {
+  const [rows, setRows] = useState<DiskSnapshot[]>([]);
+  const [picked, setPicked] = useState<string | null>(null);
+  const load = () => {
+    void listSnapshots().then((items) => {
+      setRows(items);
+      setPicked((current) => current && items.some((item) => item.id === current) ? current : items[0]?.id ?? null);
+    }).catch(() => setRows([]));
+  };
+  useEffect(load, []);
+  const current = rows.find((item) => item.id === picked);
+  return (
+    <div className="w-[42rem] max-w-[90vw]">
+      <div className="flex items-center justify-between gap-2">
+        <h2 className="text-base font-semibold">Snapshots</h2>
+        <button type="button" aria-label="Close" onClick={() => useFiles.getState().openDialog(null)}><X className="size-4" /></button>
+      </div>
+      <p className="mt-1 text-sm text-muted">A snapshot copies the files so they can be put back if something is deleted. Copies are stored on this PC and use extra disk space.</p>
+      <div className="mt-3 grid gap-3 sm:grid-cols-[16rem_1fr]">
+        <ul className="max-h-72 overflow-auto border border-line">
+          {rows.length === 0 && <li className="px-2 py-3 text-sm text-muted">No snapshots yet</li>}
+          {rows.map((item) => (
+            <li key={item.id}>
+              <button type="button" className={"block w-full px-2 py-2 text-left text-sm " + (item.id === picked ? "bg-select" : "hover:bg-header")} onClick={() => setPicked(item.id)}>
+                <span className="block">{new Date(item.taken).toLocaleString()}</span>
+                <span className="text-xs text-muted">{item.files} files · {formatSize(item.bytes)}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+        <div className="text-sm">
+          {!current && <p className="text-muted">Save a snapshot from the folder you have open, or copy your user folders.</p>}
+          {current && (
+            <>
+              <p>{current.files} files · {formatSize(current.bytes)}{current.skipped ? ` · ${current.skipped} skipped` : ""}</p>
+              <ul className="mt-2 max-h-48 list-disc space-y-1 overflow-auto pl-5">
+                {current.sources.map((source) => <li key={source} className="break-all">{source}</li>)}
+              </ul>
+            </>
+          )}
+        </div>
+      </div>
+      <div className="mt-3 flex justify-end gap-2">
+        <button type="button" className="min-h-11 px-3" disabled={!current} onClick={() => current && void removeSnapshot(current.id).then(load)}>Remove</button>
+        <button type="button" className="min-h-11 bg-accent px-3 text-accent-ink" disabled={!current} onClick={() => current && void restoreSnapshot(current.id).then((message) => { useFiles.setState({ status: message }); useFiles.getState().refresh(); })}>Restore</button>
+      </div>
+    </div>
+  );
+}
+
 function Dialogs() {
   const dialog = useFiles((s) => s.dialog);
   const nodes = useFiles((s) => s.nodes);
@@ -2010,7 +2199,7 @@ function Dialogs() {
   if (!dialog) return null;
   return (
     <div className="fixed inset-0 z-40 grid place-items-center bg-scrim p-4" onMouseDown={() => useFiles.getState().openDialog(null)}>
-      <div role="dialog" aria-modal="true" className={"w-full border border-line bg-pane p-4 shadow-lg " + (dialog.kind === "compare" ? "max-w-3xl" : dialog.kind === "search" || dialog.kind === "operation" ? "max-w-2xl" : "max-w-lg")} onMouseDown={(e) => e.stopPropagation()}>
+      <div role="dialog" aria-modal="true" className={"w-full border border-line bg-pane p-4 shadow-lg " + (dialog.kind === "compare" || dialog.kind === "snaps" ? "max-w-3xl" : dialog.kind === "search" || dialog.kind === "operation" ? "max-w-2xl" : "max-w-lg")} onMouseDown={(e) => e.stopPropagation()}>
         {(dialog.kind === "new" || dialog.kind === "rename") && (
           <form
             onSubmit={(e) => {
@@ -2096,6 +2285,18 @@ function Dialogs() {
             <div className="mt-3 flex justify-end gap-2">
               <button type="button" className="min-h-11 px-3" onClick={() => useFiles.getState().openDialog(null)}>Close</button>
               <button type="button" className="min-h-11 bg-accent px-3 text-accent-ink" onClick={() => { useFiles.getState().openDialog(null); useFiles.getState().setTab("resources"); }}>Open manual</button>
+            </div>
+          </div>
+        )}
+        {dialog.kind === "network" && <NetworkDialog location={dialog.location} />}
+        {dialog.kind === "snaps" && <SnapshotWindow />}
+        {dialog.kind === "snap-user" && (
+          <div>
+            <h2 className="text-base font-semibold">Snapshot your folders?</h2>
+            <p className="mt-2 text-sm text-muted">This copies Desktop, Documents, Downloads, Pictures, Music, and Videos into Data Finder's snapshot folder. It uses extra disk space, and large folders can take a long time.</p>
+            <div className="mt-3 flex justify-end gap-2">
+              <button type="button" className="min-h-11 px-3" onClick={() => useFiles.getState().openDialog(null)}>Cancel</button>
+              <button type="button" className="min-h-11 bg-accent px-3 text-accent-ink" onClick={() => void useFiles.getState().saveUserSnapshot()}>Copy them</button>
             </div>
           </div>
         )}
@@ -2359,6 +2560,28 @@ function FormatDialog({ id }: { id: string }) {
   );
 }
 
+function isPinned(id: string) {
+  const path = diskPath(id);
+  if (!path) return useFiles.getState().favorites.includes(id);
+  return useFiles.getState().pins.some((item) => item.toLowerCase() === path.toLowerCase());
+}
+
+function pinNode(id: string) {
+  const state = useFiles.getState();
+  const path = diskPath(id);
+  if (!path) {
+    state.toggleFavorite(id);
+    state.openMenu(null);
+    return;
+  }
+  const has = state.pins.some((item) => item.toLowerCase() === path.toLowerCase());
+  useFiles.setState({
+    pins: has ? state.pins.filter((item) => item.toLowerCase() !== path.toLowerCase()) : [...state.pins, path],
+    menu: null,
+    status: has ? "Unpinned" : "Pinned",
+  });
+}
+
 function ContextMenu() {
   const menu = useFiles((s) => s.menu);
   const ref = useRef<HTMLDivElement>(null);
@@ -2420,12 +2643,19 @@ function ContextMenu() {
         {item("Copy location", () => void state.copyPath(id ?? state.panes[active].pathId), <Link className="size-4" />)}
         {id && item("Info", () => state.openDialog({ kind: "props", id }), <FileText className="size-4" />)}
         {node && item("Read note", () => state.openReader(node.id), <FileText className="size-4" />)}
-        {node && node.kind !== "file" && item(state.favorites.includes(id!) ? "Unpin" : "Pin", () => state.toggleFavorite(id!), <Star className="size-4" />)}
+        {node && node.kind !== "file" && item(isPinned(node.id) ? "Unpin" : "Pin", () => pinNode(node.id), <Star className="size-4" />)}
         {node?.kind === "file" && node.name.toLowerCase().endsWith(".iso") && item("Mount image", () => void state.mountImage(node.id), <HardDrive className="size-4" />)}
-        {node?.kind === "drive" && !node.system && node.mounted !== false && item("Unmount", () => state.openDialog({ kind: "unmount", id: node.id }), <Unplug className="size-4" />)}
+        {node?.kind === "drive" && node.mounted === false && !node.name.endsWith(":") && item("Mount", () => {
+          const path = diskPath(node.id);
+          if (!path) return;
+          void mountVolume(path).then(() => state.reloadDrives()).catch((error: unknown) => state.openDialog({ kind: "preview", title: "Mount", body: error instanceof Error ? error.message : "Could not mount that drive" }));
+        }, <HardDrive className="size-4" />)}
+        {node?.kind === "drive" && node.note === "Network Drive" && item("Disconnect", () => state.openDialog({ kind: "unmount", id: node.id }), <Unplug className="size-4" />)}
+        {node?.kind === "drive" && !node.system && node.mounted !== false && node.note !== "Network Drive" && item("Unmount", () => state.openDialog({ kind: "unmount", id: node.id }), <Unplug className="size-4" />)}
         {node?.kind === "drive" && !node.system && node.mounted !== false && node.name.endsWith(":") && item("Format", () => state.openDialog({ kind: "format", id: node.id }), <Trash2 className="size-4" />)}
         {item("Refresh", () => state.refresh(), <RefreshCw className="size-4" />)}
         {item("Save snapshot", () => state.takeSnapshot(), <History className="size-4" />)}
+        {item("Snapshots", () => state.openDialog({ kind: "snaps" }), <History className="size-4" />)}
       </div>
     </>
   );
@@ -2580,6 +2810,23 @@ function NotePane({ id }: { id: string }) {
   );
 }
 
+function HeaderSearch() {
+  const active = useFiles((s) => s.active);
+  const query = useFiles((s) => s.panes[s.active].query);
+  return (
+    <label className="ml-auto flex h-8 w-56 items-center gap-1 rounded-md border border-line bg-pane px-2">
+      <Search className="size-3.5 text-muted" />
+      <input
+        value={query}
+        onChange={(e) => useFiles.getState().setQuery(active, e.target.value)}
+        placeholder="Search"
+        aria-label="Search this folder"
+        className="h-full w-full bg-transparent text-sm outline-none"
+      />
+    </label>
+  );
+}
+
 export function FileManager() {
   const split = useFiles((s) => s.split);
   const dark = useFiles((s) => s.dark);
@@ -2597,6 +2844,8 @@ export function FileManager() {
       /* keep defaults */
     }
     void (isDesktop() ? useFiles.getState().openFolder(0) : useFiles.getState().calcSizes(0));
+    const blockMenu = (event: Event) => event.preventDefault();
+    window.addEventListener("contextmenu", blockMenu, true);
     let savedNodes = useFiles.getState().nodes;
     let savedOrder = useFiles.getState().order;
     let savedSeq = useFiles.getState().seq;
@@ -2604,7 +2853,7 @@ export function FileManager() {
       useFiles.getState().panes[0].pathId,
       useFiles.getState().panes[1].pathId,
     ];
-    return useFiles.subscribe((state) => {
+    const unsub = useFiles.subscribe((state) => {
       const pathFor = (id: string, index: 0 | 1) => {
         if (isDiskId(id) || !state.nodes[id]) return samplePaths[index];
         samplePaths[index] = id;
@@ -2640,7 +2889,10 @@ export function FileManager() {
         showExt: state.showExt,
         previewOpen: state.previewOpen,
         snaps: state.snaps,
-        uiRev: 3,
+        uiRev: 4,
+        pins: state.pins,
+        recentPaths: state.recentPaths,
+        showAllDrives: state.showAllDrives,
       };
       try {
         localStorage.setItem(UI_KEY, JSON.stringify(prefs));
@@ -2657,6 +2909,10 @@ export function FileManager() {
         /* the browser refused the save */
       }
     });
+    return () => {
+      window.removeEventListener("contextmenu", blockMenu, true);
+      unsub();
+    };
   }, []);
 
   useEffect(() => {
@@ -2743,8 +2999,9 @@ export function FileManager() {
   const helpPage = useFiles((s) => s.helpPage);
   return (
     <div className="flex h-dvh flex-col overflow-hidden bg-app text-ink">
-      <header className="flex h-8 shrink-0 items-center px-3">
+      <header className="flex h-10 shrink-0 items-center gap-3 px-3">
         <h1 className="text-xs font-semibold">Data Finder</h1>
+        <HeaderSearch />
       </header>
       <TabRow />
       <Ribbon />

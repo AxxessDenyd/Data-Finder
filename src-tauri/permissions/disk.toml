@@ -14,4 +14,12 @@ commands.allow = [
   "unmount_drive",
   "mount_image",
   "format_drive",
+  "mount_volume",
+  "map_network",
+  "open_url",
+  "known_folders",
+  "snapshot_save",
+  "snapshot_list",
+  "snapshot_restore",
+  "snapshot_remove",
 ]

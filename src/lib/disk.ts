@@ -390,17 +390,73 @@ async function liveDirBytes(dir: DirHandle, budget: { n: number }): Promise<{ by
   return { bytes: total, partial };
 }
 
-export type MeasuredSize = { bytes: number; partial: boolean };
+export type MeasuredSize = { bytes: number; partial: boolean; blocked?: boolean };
+
+export interface DiskSnapshot {
+  id: string;
+  taken: number;
+  sources: string[];
+  files: number;
+  bytes: number;
+  skipped: number;
+}
+
+export interface KnownFolder {
+  name: string;
+  path: string;
+}
+
+export async function openExternal(url: string): Promise<void> {
+  if (!isDesktop()) {
+    window.open(url, "_blank", "noopener");
+    return;
+  }
+  await invoke("open_url", { url });
+}
+
+export async function knownFolders(): Promise<KnownFolder[]> {
+  if (!isDesktop()) return [];
+  return invoke<KnownFolder[]>("known_folders");
+}
+
+export async function mountVolume(path: string): Promise<string> {
+  return invoke<string>("mount_volume", { path });
+}
+
+export async function mapNetwork(unc: string, letter: string): Promise<string> {
+  return invoke<string>("map_network", { unc, letter });
+}
+
+export async function saveSnapshot(sources: string[]): Promise<DiskSnapshot> {
+  return invoke<DiskSnapshot>("snapshot_save", { sources });
+}
+
+export async function listSnapshots(): Promise<DiskSnapshot[]> {
+  if (!isDesktop()) return [];
+  return invoke<DiskSnapshot[]>("snapshot_list");
+}
+
+export async function restoreSnapshot(id: string): Promise<string> {
+  return invoke<string>("snapshot_restore", { id });
+}
+
+export async function removeSnapshot(id: string): Promise<void> {
+  await invoke("snapshot_remove", { id });
+}
 
 export async function measureChildren(id: string): Promise<Record<string, MeasuredSize>> {
   const sizes: Record<string, MeasuredSize> = {};
   if (id.startsWith("disk:")) {
     const path = paths.get(id);
     if (!path) return sizes;
-    const rows = await invoke<{ name: string; bytes: number | null; partial?: boolean }[]>("measure_children", { path });
+    const rows = await invoke<{ name: string; bytes: number | null; partial?: boolean; blocked?: boolean }[]>("measure_children", { path });
     for (const row of rows) {
+      if (row.blocked) {
+        sizes[row.name.toLowerCase()] = { bytes: 0, partial: true, blocked: true };
+        continue;
+      }
       if (row.bytes == null) continue;
-      sizes[row.name.toLowerCase()] = { bytes: row.bytes, partial: !!row.partial };
+      sizes[row.name.toLowerCase()] = { bytes: row.bytes, partial: !!row.partial, blocked: !!row.blocked };
     }
     return sizes;
   }
