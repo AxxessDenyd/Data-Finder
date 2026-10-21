@@ -22,8 +22,8 @@
   --color-header: #f7f9fb;
   --color-status: #f4f7fa;
   --color-danger: #c42b1c;
-  --color-folder: #fff1c2;
-  --color-folder-back: #e2a30e;
+  --color-folder: #9ccaf6;
+  --color-folder-back: #3b8fe6;
   --color-diff: #e7f3fc;
   --color-scrim: rgb(15 23 32 / 0.4);
   --color-menu: #ffffff;
@@ -51,8 +51,8 @@
   --color-header: #2a3540;
   --color-status: #12181e;
   --color-danger: #ffb3bc;
-  --color-folder: #ffe38a;
-  --color-folder-back: #c99212;
+  --color-folder: #9ccaf6;
+  --color-folder-back: #3b8fe6;
   --color-diff: #17344a;
   --color-scrim: rgb(0 0 0 / 0.62);
   --color-menu: #2a3540;
@@ -137,6 +137,23 @@ textarea:focus-visible {
 .menu-card {
   border-radius: 12px;
   box-shadow: 0 16px 40px rgb(15 23 32 / 0.18);
+}
+
+[role="dialog"] {
+  border-radius: 16px;
+  box-shadow: 0 24px 64px rgb(8 16 28 / 0.28);
+}
+
+[role="dialog"] button,
+[role="dialog"] input,
+[role="dialog"] select,
+[role="dialog"] textarea {
+  border-radius: 8px;
+}
+
+.bg-bar-track,
+.bg-bar {
+  border-radius: 999px;
 }
 
 @media (prefers-reduced-motion: reduce) {

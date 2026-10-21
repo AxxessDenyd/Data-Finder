@@ -10,7 +10,7 @@ export const aboutInfo = {
   created: "October 2026",
   author: "William Schneider",
   updated: "October 20, 2026",
-  version: "0.2.15",
+  version: "0.2.16",
   latest: "https://github.com/AxxessDenyd/Data-Finder/releases/latest",
   setup: "https://github.com/AxxessDenyd/Data-Finder/releases/latest/download/Data-Finder-Setup.exe",
   portable: "https://github.com/AxxessDenyd/Data-Finder/releases/latest/download/Data-Finder.exe",
