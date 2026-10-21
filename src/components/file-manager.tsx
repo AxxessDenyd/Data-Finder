@@ -92,10 +92,19 @@ function shownName(name: string, kind: string, showExt: boolean) {
   return dot > 0 ? name.slice(0, dot) : name;
 }
 
+function FolderMark({ className = "size-4 shrink-0" }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" width="16" height="16" className={className} aria-hidden="true">
+      <path d="M3 8.4A2.4 2.4 0 0 1 5.4 6h3.1l1.7 1.8h8.4A2.4 2.4 0 0 1 21 10.2v.5H3V8.4Z" fill="var(--color-folder-back)" />
+      <path d="M3 10.4h18V17.7A2.3 2.3 0 0 1 18.7 20H5.3A2.3 2.3 0 0 1 3 17.7V10.4Z" fill="var(--color-folder)" />
+    </svg>
+  );
+}
+
 function Icon({ node, className = "size-4 shrink-0" }: { node: Pick<FsNode, "kind" | "note"> & { name?: string }; className?: string }) {
   if (node.kind === "computer") return <Monitor className={`${className} text-accent`} />;
   if (node.kind === "drive") return <HardDrive className={`${className} text-accent`} />;
-  if (node.kind === "dir") return <Folder className={`${className} fill-folder text-folder`} />;
+  if (node.kind === "dir") return <FolderMark className={className} />;
   const [Glyph, tint] = glyphFor(node.name, node.note != null);
   return <Glyph className={`${className} ${tint}`} />;
 }
@@ -225,13 +234,13 @@ function PlacesMenu({ anchor, onClose }: { anchor: DOMRect; onClose: () => void 
         {rows.length === 0 && <p className="px-2 py-2 text-sm text-muted">No folders yet</p>}
         {rows.map((place) => (
           <button key={place.path} type="button" className="flex min-h-9 w-full items-center gap-2 rounded-md px-2 text-left text-sm hover:bg-select" title={place.path} onClick={() => openPath(place.path)}>
-            <Folder className="size-4 shrink-0 text-folder" />
+            <FolderMark className="size-4 shrink-0" />
             <span className="truncate">{place.name}</span>
           </button>
         ))}
         {rows.length === 0 && Object.values(nodes).filter((node) => node.kind === "dir").slice(0, 8).map((node) => (
           <button key={node.id} type="button" className="flex min-h-9 w-full items-center gap-2 rounded-md px-2 text-left text-sm hover:bg-select" onClick={() => { useFiles.getState().navigate(active, node.id); onClose(); }}>
-            <Folder className="size-4 shrink-0 text-folder" />
+            <FolderMark className="size-4 shrink-0" />
             <span className="truncate">{node.name}</span>
           </button>
         ))}

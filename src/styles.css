@@ -22,7 +22,8 @@
   --color-header: #f7f9fb;
   --color-status: #f4f7fa;
   --color-danger: #c42b1c;
-  --color-folder: #e8b931;
+  --color-folder: #fff1c2;
+  --color-folder-back: #e2a30e;
   --color-diff: #e7f3fc;
   --color-scrim: rgb(15 23 32 / 0.4);
   --color-menu: #ffffff;
@@ -30,30 +31,31 @@
 }
 
 .dark {
-  --color-app: #14161a;
-  --color-ink: #f4f6f8;
-  --color-tab: #1a1d22;
-  --color-tab-ink: #f4f6f8;
-  --color-muted: #a7b0b8;
-  --color-line: #2e343c;
-  --color-ribbon: #1c2026;
-  --color-ribbon-edge: #2e343c;
-  --color-pane: #1c2026;
-  --color-tree: #171b20;
-  --color-accent: #6cb6ff;
-  --color-accent-ink: #062033;
-  --color-select: #16324a;
-  --color-select-edge: #6cb6ff;
-  --color-bar: #6cb6ff;
-  --color-bar-track: #2a3138;
-  --color-free: #6ccb5f;
-  --color-header: #22272e;
-  --color-status: #14181d;
-  --color-danger: #ff99a4;
-  --color-folder: #e8b931;
-  --color-diff: #143044;
+  --color-app: #0e1216;
+  --color-ink: #f3f6f8;
+  --color-tab: #171d23;
+  --color-tab-ink: #f3f6f8;
+  --color-muted: #b7c2cc;
+  --color-line: #3a4652;
+  --color-ribbon: #1b232b;
+  --color-ribbon-edge: #3a4652;
+  --color-pane: #222b34;
+  --color-tree: #161d24;
+  --color-accent: #4da3ff;
+  --color-accent-ink: #041018;
+  --color-select: #1a5694;
+  --color-select-edge: #4da3ff;
+  --color-bar: #4da3ff;
+  --color-bar-track: #33404c;
+  --color-free: #7ddea0;
+  --color-header: #2a3540;
+  --color-status: #12181e;
+  --color-danger: #ffb3bc;
+  --color-folder: #ffe38a;
+  --color-folder-back: #c99212;
+  --color-diff: #17344a;
   --color-scrim: rgb(0 0 0 / 0.62);
-  --color-menu: #242a31;
+  --color-menu: #2a3540;
   color-scheme: dark;
 }
 
@@ -121,6 +123,15 @@ textarea:focus-visible {
 
 .file-row:not([aria-selected="true"]):hover td {
   background: color-mix(in srgb, var(--color-header) 88%, var(--color-accent));
+}
+
+.dark .file-row:not([aria-selected="true"]):hover td {
+  background: #31404d;
+}
+
+.dark .file-row[aria-selected="true"] td {
+  background: #1a5694;
+  color: #f3f6f8;
 }
 
 .menu-card {
