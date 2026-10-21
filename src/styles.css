@@ -1,59 +1,59 @@
 @import "tailwindcss";
 
 @theme {
-  --font-sans: "Segoe UI Variable", "Segoe UI", sans-serif;
-  --color-app: #f3f3f3;
-  --color-ink: #1a1a1a;
-  --color-tab: #f3f3f3;
-  --color-tab-ink: #1a1a1a;
-  --color-muted: #5d5d5d;
-  --color-line: #e5e5e5;
-  --color-ribbon: #f3f3f3;
-  --color-ribbon-edge: #e5e5e5;
+  --font-sans: "Source Sans 3", "Segoe UI Variable", "Segoe UI", sans-serif;
+  --color-app: #eef1f4;
+  --color-ink: #1b1f24;
+  --color-tab: #e7ebf0;
+  --color-tab-ink: #1b1f24;
+  --color-muted: #5c6770;
+  --color-line: #d8dee6;
+  --color-ribbon: #f7f9fb;
+  --color-ribbon-edge: #d8dee6;
   --color-pane: #ffffff;
-  --color-tree: #f9f9f9;
-  --color-accent: #0067c0;
+  --color-tree: #f4f7fa;
+  --color-accent: #0f6cbd;
   --color-accent-ink: #ffffff;
-  --color-select: #cce8ff;
-  --color-select-edge: #0067c0;
-  --color-bar: #0067c0;
-  --color-bar-track: #ededed;
-  --color-free: #0f7b0f;
-  --color-header: #f9f9f9;
-  --color-status: #f3f3f3;
+  --color-select: #e5f1fb;
+  --color-select-edge: #0f6cbd;
+  --color-bar: #0f6cbd;
+  --color-bar-track: #e6ebf0;
+  --color-free: #0e7a3d;
+  --color-header: #f7f9fb;
+  --color-status: #f4f7fa;
   --color-danger: #c42b1c;
-  --color-folder: #f8c948;
-  --color-diff: #e8f4ff;
-  --color-scrim: rgb(0 0 0 / 0.35);
+  --color-folder: #e8b931;
+  --color-diff: #e7f3fc;
+  --color-scrim: rgb(15 23 32 / 0.4);
   --color-menu: #ffffff;
-  --radius-sm: 8px;
+  --radius-sm: 10px;
 }
 
 .dark {
-  --color-app: #202020;
-  --color-ink: #ffffff;
-  --color-tab: #202020;
-  --color-tab-ink: #ffffff;
-  --color-muted: #adadad;
-  --color-line: #3b3b3b;
-  --color-ribbon: #202020;
-  --color-ribbon-edge: #3b3b3b;
-  --color-pane: #272727;
-  --color-tree: #1c1c1c;
-  --color-accent: #60cdff;
-  --color-accent-ink: #001018;
-  --color-select: #003e92;
-  --color-select-edge: #60cdff;
-  --color-bar: #60cdff;
-  --color-bar-track: #3b3b3b;
+  --color-app: #14161a;
+  --color-ink: #f4f6f8;
+  --color-tab: #1a1d22;
+  --color-tab-ink: #f4f6f8;
+  --color-muted: #a7b0b8;
+  --color-line: #2e343c;
+  --color-ribbon: #1c2026;
+  --color-ribbon-edge: #2e343c;
+  --color-pane: #1c2026;
+  --color-tree: #171b20;
+  --color-accent: #6cb6ff;
+  --color-accent-ink: #062033;
+  --color-select: #16324a;
+  --color-select-edge: #6cb6ff;
+  --color-bar: #6cb6ff;
+  --color-bar-track: #2a3138;
   --color-free: #6ccb5f;
-  --color-header: #2d2d2d;
-  --color-status: #1c1c1c;
+  --color-header: #22272e;
+  --color-status: #14181d;
   --color-danger: #ff99a4;
-  --color-folder: #f8c948;
-  --color-diff: #143a5c;
-  --color-scrim: rgb(0 0 0 / 0.55);
-  --color-menu: #2c2c2c;
+  --color-folder: #e8b931;
+  --color-diff: #143044;
+  --color-scrim: rgb(0 0 0 / 0.62);
+  --color-menu: #242a31;
   color-scheme: dark;
 }
 
@@ -68,8 +68,9 @@
     background: var(--color-app);
     color: var(--color-ink);
     font-family: var(--font-sans);
-    font-size: 13px;
+    font-size: 14px;
     line-height: 1.45;
+    -webkit-font-smoothing: antialiased;
   }
   button:not(:disabled),
   [role="button"]:not(:disabled) {
@@ -85,6 +86,46 @@
     background: var(--color-pane);
     color: var(--color-ink);
   }
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+.app-tab {
+  border-radius: 10px 10px 0 0;
+  padding: 8px 14px;
+}
+
+.app-tab[aria-selected="true"] {
+  background: var(--color-pane);
+  box-shadow: inset 0 2px 0 var(--color-accent);
+}
+
+.file-row td {
+  border-bottom: 1px solid color-mix(in srgb, var(--color-line) 75%, transparent);
+}
+
+.file-row[aria-selected="true"] td:first-child {
+  box-shadow: inset 3px 0 0 var(--color-accent);
+}
+
+.file-row[aria-selected="true"] td {
+  background: var(--color-select);
+}
+
+.file-row:not([aria-selected="true"]):hover td {
+  background: color-mix(in srgb, var(--color-header) 88%, var(--color-accent));
+}
+
+.menu-card {
+  border-radius: 12px;
+  box-shadow: 0 16px 40px rgb(15 23 32 / 0.18);
 }
 
 @media (prefers-reduced-motion: reduce) {

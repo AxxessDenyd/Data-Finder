@@ -200,7 +200,7 @@ function MenuPop({ children, onClose }: { children: ReactNode; onClose: () => vo
   return (
     <>
       <button type="button" aria-label="Close menu" className="fixed inset-0 z-20 cursor-default" onClick={onClose} />
-      <div className="absolute top-full left-0 z-30 max-h-80 min-w-56 overflow-auto rounded-lg border border-line bg-menu p-1 shadow-xl">{children}</div>
+      <div className="menu-card absolute top-full left-0 z-30 max-h-80 min-w-56 overflow-auto border border-line bg-menu p-1">{children}</div>
     </>
   );
 }
@@ -221,7 +221,7 @@ function PlacesMenu({ anchor, onClose }: { anchor: DOMRect; onClose: () => void 
   return (
     <>
       <button type="button" aria-label="Close places" className="fixed inset-0 z-30 cursor-default" onClick={onClose} />
-      <div className="fixed z-40 max-h-[70vh] w-64 overflow-auto border border-line bg-pane p-1 shadow-md" style={{ left, top: anchor.bottom + 4 }}>
+      <div className="menu-card fixed z-40 max-h-[70vh] w-64 overflow-auto border border-line bg-menu p-1" style={{ left, top: anchor.bottom + 4 }}>
         {rows.length === 0 && <p className="px-2 py-2 text-sm text-muted">No folders yet</p>}
         {rows.map((place) => (
           <button key={place.path} type="button" className="flex min-h-9 w-full items-center gap-2 rounded-md px-2 text-left text-sm hover:bg-select" title={place.path} onClick={() => openPath(place.path)}>
@@ -447,15 +447,15 @@ function TabRow() {
   ];
   const go = (id: RibbonTab) => useFiles.getState().setTab(id);
   return (
-    <div className="flex shrink-0 items-end bg-tab">
-      <div className="relative mb-1 ml-1">
-        <button type="button" aria-label="Application menu" className="grid size-8 place-items-center bg-accent text-accent-ink" onClick={() => setMenu((open) => !open)}>
+    <div className="flex shrink-0 items-end gap-1 bg-tab px-2 pt-1.5">
+      <div className="relative mb-1 ml-0.5">
+        <button type="button" aria-label="Application menu" className="grid size-8 place-items-center rounded-lg bg-accent text-accent-ink" onClick={() => setMenu((open) => !open)}>
           <Menu className="size-4" />
         </button>
         {menu && (
           <>
             <button type="button" aria-label="Close menu" className="fixed inset-0 z-20 cursor-default" onClick={() => setMenu(false)} />
-            <div className="absolute top-full left-0 z-30 min-w-56 border border-line bg-pane py-1 shadow-md">
+            <div className="menu-card absolute top-full left-0 z-30 min-w-56 border border-line bg-menu py-1">
               <button type="button" className="block min-h-11 w-full px-3 text-left text-sm hover:bg-select" onClick={() => { useFiles.getState().setOptions({ dark: !dark }); setMenu(false); }}>{dark ? "Light mode" : "Dark mode"}</button>
               <button type="button" className="block min-h-11 w-full px-3 text-left text-sm hover:bg-select" onClick={() => { go("resources"); setMenu(false); }}>Help</button>
               <button type="button" className="block min-h-11 w-full px-3 text-left text-sm hover:bg-select" onClick={() => { const state = useFiles.getState(); state.setTab("resources"); state.setHelpPage("about"); setMenu(false); }}>About</button>
@@ -463,13 +463,14 @@ function TabRow() {
           </>
         )}
       </div>
-      <div className="flex min-w-0 flex-1 items-end overflow-x-auto">
+      <div className="flex min-w-0 flex-1 items-end gap-0.5 overflow-x-auto">
       {tabs.map(([id, label]) => (
         <button
           key={id}
           type="button"
+          aria-selected={tab === id}
           onClick={() => go(id)}
-          className={"shrink-0 rounded-t-md px-3 py-1.5 text-sm " + (tab === id ? "bg-pane font-semibold text-ink" : "text-muted hover:bg-header")}
+          className={"app-tab shrink-0 text-sm " + (tab === id ? "font-semibold text-ink" : "text-muted hover:bg-header")}
         >
           {label}
         </button>
@@ -1240,8 +1241,47 @@ function PreviewPane({ index }: { index: 0 | 1 }) {
   );
 }
 
+function samePane(a: ReturnType<typeof useFiles.getState>, b: ReturnType<typeof useFiles.getState>, index: 0 | 1) {
+  const other = index === 0 ? 1 : 0;
+  return a.nodes === b.nodes
+    && a.order === b.order
+    && a.panes[index] === b.panes[index]
+    && a.panes[other].flat === b.panes[other].flat
+    && a.panes[other].pathId === b.panes[other].pathId
+    && a.filters === b.filters
+    && a.dupes === b.dupes
+    && a.diff === b.diff
+    && a.split === b.split
+    && a.showAllDrives === b.showAllDrives
+    && a.calcDirs === b.calcDirs
+    && a.searchPane === b.searchPane
+    && a.searchHits === b.searchHits
+    && a.searchQuery === b.searchQuery
+    && a.shadowPane === b.shadowPane
+    && a.shadowId === b.shadowId
+    && a.snaps === b.snaps
+    && a.columns === b.columns
+    && a.viewMode === b.viewMode
+    && a.compact === b.compact
+    && a.reading === b.reading
+    && a.showNav === b.showNav
+    && a.showExt === b.showExt
+    && a.itemChecks === b.itemChecks
+    && a.detailsOpen === b.detailsOpen
+    && a.previewOpen === b.previewOpen
+    && a.dateFormat === b.dateFormat
+    && a.timeFormat === b.timeFormat
+    && a.barMode === b.barMode
+    && a.clipboard === b.clipboard
+    && a.active === b.active;
+}
+
 function PaneView({ index }: { index: 0 | 1 }) {
-  const state = useFiles();
+  const [, redraw] = useState(0);
+  useEffect(() => useFiles.subscribe((next, prev) => {
+    if (!prev || !samePane(next, prev, index)) redraw((n) => n + 1);
+  }), [index]);
+  const state = useFiles.getState();
   const pane = state.panes[index];
   const active = state.active;
   const nodes = state.nodes;
@@ -1263,6 +1303,34 @@ function PaneView({ index }: { index: 0 | 1 }) {
   const md = useMinWidth(768);
   const lg = useMinWidth(1024);
   const cols = { ...defaultColumns, ...state.columns };
+  const rowHeight = state.compact ? 28 : 36;
+  const scroller = useRef<HTMLDivElement>(null);
+  const [windowed, setWindowed] = useState({ start: 0, end: 80 });
+  useEffect(() => {
+    const el = scroller.current;
+    if (el) el.scrollTop = 0;
+    setWindowed({ start: 0, end: 80 });
+  }, [pane.pathId, state.viewMode]);
+  useEffect(() => {
+    const el = scroller.current;
+    if (!el) return;
+    const measure = () => {
+      const start = Math.max(0, Math.floor(el.scrollTop / rowHeight) - 12);
+      const count = Math.ceil(el.clientHeight / rowHeight) + 24;
+      const end = start + count;
+      setWindowed((prev) => (prev.start === start && prev.end === end ? prev : { start, end }));
+    };
+    measure();
+    el.addEventListener("scroll", measure, { passive: true });
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => {
+      el.removeEventListener("scroll", measure);
+      observer.disconnect();
+    };
+  }, [pane.pathId, state.viewMode, rowHeight, view.rows.length]);
+  const virtual = state.viewMode === "details" && view.rows.length > 80 && !band;
+  const shownRows = virtual ? view.rows.slice(windowed.start, windowed.end) : view.rows;
   const tableWidth =
     cols.name +
     cols.size +
@@ -1378,6 +1446,9 @@ function PaneView({ index }: { index: 0 | 1 }) {
         </aside>
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <div
+          ref={scroller}
+          data-scroller=""
+          data-row-h={rowHeight}
           className="relative min-h-0 min-w-0 flex-1 overflow-auto"
           onPointerDown={(event) => {
             if (event.button !== 0) return;
@@ -1446,7 +1517,12 @@ function PaneView({ index }: { index: 0 | 1 }) {
               </tr>
             </thead>
             <tbody>
-              {view.rows.map((row) => {
+              {virtual && windowed.start > 0 && (
+                <tr aria-hidden="true">
+                  <td colSpan={8} style={{ height: windowed.start * rowHeight, padding: 0, border: 0 }} />
+                </tr>
+              )}
+              {shownRows.map((row) => {
                 const selected = pane.selected.includes(row.id);
                 const pct = barPercent(row.bytes, max, barMode);
                 const cut = clipboard?.mode === "cut" && row.nodeId && clipboard.ids.includes(row.nodeId);
@@ -1459,8 +1535,8 @@ function PaneView({ index }: { index: 0 | 1 }) {
                     draggable={Boolean(row.nodeId)}
                     aria-selected={selected}
                     className={
-                      (state.compact ? "" : " ") +
-                      (selected ? "bg-select" : "hover:bg-header") +
+                      "file-row" +
+                      (state.compact ? "" : "") +
                       (cut ? " opacity-50" : "")
                     }
                     onClick={(e) => {
@@ -1565,6 +1641,11 @@ function PaneView({ index }: { index: 0 | 1 }) {
                   </tr>
                 );
               })}
+              {virtual && windowed.end < view.rows.length && (
+                <tr aria-hidden="true">
+                  <td colSpan={8} style={{ height: (view.rows.length - windowed.end) * rowHeight, padding: 0, border: 0 }} />
+                </tr>
+              )}
               {view.rows.length === 0 && (
                 <tr>
                   <td colSpan={8} className="px-3 py-8 text-center text-muted">
@@ -3000,7 +3081,7 @@ function StatusBar() {
   const known = selected.every((id) => nodes[id]?.bytes != null);
   const bytes = selected.reduce((sum, id) => sum + (nodes[id]?.bytes ?? 0), 0);
   return (
-    <div className="flex h-7 shrink-0 items-center gap-3 border-t border-line bg-header px-2 text-xs">
+    <div className="flex h-8 shrink-0 items-center gap-3 border-t border-line bg-status px-3 text-xs text-muted">
       <span className="min-w-0 flex-1 truncate">{status}</span>
       {selected.length > 0 && (
         <span className="shrink-0">{selected.length} selected{known ? ` · ${formatSize(bytes)}` : ""}</span>
@@ -3686,7 +3767,10 @@ export function FileManager() {
       useFiles.getState().panes[0].pathId,
       useFiles.getState().panes[1].pathId,
     ];
+    let saveTimer = 0;
     const unsub = useFiles.subscribe((state) => {
+      window.clearTimeout(saveTimer);
+      saveTimer = window.setTimeout(() => {
       const pathFor = (id: string, index: 0 | 1) => {
         if (isDiskId(id) || !state.nodes[id]) return samplePaths[index];
         samplePaths[index] = id;
@@ -3742,8 +3826,10 @@ export function FileManager() {
       } catch {
         /* the browser refused the save */
       }
+      }, 400);
     });
     return () => {
+      window.clearTimeout(saveTimer);
       window.removeEventListener("contextmenu", blockMenu, true);
       unsub();
     };
@@ -3787,7 +3873,15 @@ export function FileManager() {
         const dir = e.key === "ArrowDown" ? 1 : -1;
         store.moveSelection(index, dir, visible);
         const next = useFiles.getState().panes[index].selected[0];
-        if (next) document.querySelector(`[data-pane="${index}"] [data-row="${CSS.escape(next)}"]`)?.scrollIntoView({ block: "nearest" });
+        const scroller = document.querySelector(`[data-pane="${index}"] [data-scroller]`) as HTMLElement | null;
+        const rowH = Number(scroller?.getAttribute("data-row-h") || 36);
+        const pos = next ? visible.indexOf(next) : -1;
+        if (scroller && pos >= 0) {
+          const top = pos * rowH;
+          const bottom = top + rowH;
+          if (top < scroller.scrollTop) scroller.scrollTop = top;
+          else if (bottom > scroller.scrollTop + scroller.clientHeight) scroller.scrollTop = bottom - scroller.clientHeight;
+        }
       } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") {
         e.preventDefault();
         store.selectAll(index, visible);
