@@ -1838,7 +1838,13 @@ fn parse_bitlocker_line(line: &str) -> Option<BitLockerDrive> {
 }
 
 #[tauri::command]
-fn bitlocker_status(elevate: bool) -> Result<Vec<BitLockerDrive>, String> {
+async fn bitlocker_status(elevate: bool) -> Result<Vec<BitLockerDrive>, String> {
+    tauri::async_runtime::spawn_blocking(move || bitlocker_status_blocking(elevate))
+        .await
+        .map_err(|err| err.to_string())?
+}
+
+fn bitlocker_status_blocking(elevate: bool) -> Result<Vec<BitLockerDrive>, String> {
     let body = r#"$ErrorActionPreference = 'Continue'
 function Take([string]$text, [string]$name) {
   $pattern = '(?m)^\s*' + [regex]::Escape($name) + ':\s*(.+)$'
@@ -1857,45 +1863,79 @@ function ShortState([string]$value) {
   if (-not $clean) { return 'Unknown' }
   return $clean
 }
-$lines = New-Object System.Collections.Generic.List[string]
-$letters = @(Get-PSDrive -PSProvider FileSystem -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^[A-Za-z]$' } | ForEach-Object { $_.Name.ToUpper() })
-foreach ($letter in $letters) {
-  $raw = ''
-  try { $raw = (& manage-bde.exe -status ($letter + ':') 2>&1 | Out-String) } catch { $raw = '' }
-  if ($raw -notmatch 'Lock Status:' -and $raw -notmatch 'Conversion Status:') { continue }
-  $lockText = Take $raw 'Lock Status'
+function Clean([string]$value) {
+  if (-not $value) { return '' }
+  return (($value -replace '[|\r\n]', ' ').Trim())
+}
+$found = @{}
+$bde = Join-Path $env:SystemRoot 'System32\manage-bde.exe'
+$raw = ''
+if (Test-Path -LiteralPath $bde) {
+  try { $raw = (& $bde -status 2>&1 | Out-String) } catch { $raw = '' }
+}
+$chunks = [regex]::Split([string]$raw, '(?m)(?=^Volume )')
+foreach ($chunk in $chunks) {
+  if ($chunk -notmatch '(?m)^Volume\s+([A-Za-z]):') { continue }
+  $letter = $Matches[1].ToUpper()
+  $lockText = Take $chunk 'Lock Status'
   $lock = 'Unlocked'
   if ($lockText -match 'Locked') { $lock = 'Locked' }
-  $protText = Take $raw 'Protection Status'
+  $protText = Take $chunk 'Protection Status'
   $prot = 'Off'
-  if ($protText -match 'On') { $prot = 'On' }
-  $state = ShortState (Take $raw 'Conversion Status')
+  if ($protText -match '(?i)\bOn\b') { $prot = 'On' }
+  $state = 'FullyDecrypted'
+  $stateText = Take $chunk 'Conversion Status'
+  if ($stateText) { $state = ShortState $stateText }
+  elseif ($lock -eq 'Locked' -or $prot -eq 'On') { $state = 'FullyEncrypted' }
   $pct = 0
-  $pctText = Take $raw 'Percentage Encrypted'
+  $pctText = Take $chunk 'Percentage Encrypted'
   if ($pctText -match '(\d+)') { $pct = [int]$Matches[1] }
+  $label = ''
+  if ($chunk -match '(?m)^Volume\s+[A-Za-z]:\s*\[([^\]]*)\]') { $label = Clean $Matches[1] }
   $volume = 'Data'
-  if ($raw -match '\[OS Volume\]') { $volume = 'OperatingSystem' }
-  $idList = New-Object System.Collections.Generic.List[string]
-  $idRaw = ''
-  try { $idRaw = (& manage-bde.exe -protectors -get ($letter + ':') -type RecoveryPassword 2>&1 | Out-String) } catch { $idRaw = '' }
-  foreach ($found in [regex]::Matches($idRaw, '\{([0-9A-Fa-f\-]+)\}')) {
-    $hex = ($found.Groups[1].Value -replace '-', '').ToUpper()
-    if ($hex.Length -ge 8) {
-      $short = $hex.Substring(0, 8)
-      if (-not $idList.Contains($short)) { [void]$idList.Add($short) }
+  if ($chunk -match '\[OS Volume\]' -or $label -match '^(?i)os$') { $volume = 'Operating system' }
+  elseif ($label) { $volume = $label }
+  $ids = ''
+  if ($lock -eq 'Locked' -and (Test-Path -LiteralPath $bde)) {
+    $idRaw = ''
+    try { $idRaw = (& $bde -protectors -get ($letter + ':') -type RecoveryPassword 2>&1 | Out-String) } catch { $idRaw = '' }
+    $idList = New-Object System.Collections.Generic.List[string]
+    foreach ($item in [regex]::Matches($idRaw, '\{([0-9A-Fa-f\-]+)\}')) {
+      $hex = ($item.Groups[1].Value -replace '-', '').ToUpper()
+      if ($hex.Length -ge 8) {
+        $short = $hex.Substring(0, 8)
+        if (-not $idList.Contains($short)) { [void]$idList.Add($short) }
+      }
     }
+    $ids = $idList -join ','
   }
-  $ids = $idList -join ','
-  $lines.Add(($letter + ':|' + $lock + '|' + $prot + '|' + $state + '|' + $pct + '|' + $volume + '||' + $ids))
+  $found[$letter] = ($letter + ':|' + $lock + '|' + $prot + '|' + $state + '|' + $pct + '|' + (Clean $volume) + '||' + $ids)
 }
-if ($lines.Count -eq 0) {
-  if (-not (Get-Command manage-bde.exe -ErrorAction SilentlyContinue)) { Save 'error:Windows could not read BitLocker on this PC.' }
+$disks = @()
+try { $disks = @(Get-CimInstance -ClassName Win32_LogicalDisk -Filter 'DriveType=2 OR DriveType=3' -ErrorAction Stop) } catch { $disks = @() }
+if ($disks.Count -eq 0) {
+  try { $disks = @(Get-WmiObject -Class Win32_LogicalDisk -Filter 'DriveType=2 OR DriveType=3' -ErrorAction SilentlyContinue) } catch { $disks = @() }
+}
+foreach ($disk in $disks) {
+  $id = [string]$disk.DeviceID
+  if ($id -notmatch '^([A-Za-z]):') { continue }
+  $letter = $Matches[1].ToUpper()
+  if ($found.ContainsKey($letter)) { continue }
+  $name = Clean ([string]$disk.VolumeName)
+  $volume = 'Data'
+  if ($disk.DriveType -eq 2) { $volume = 'Removable' }
+  if ($name) { $volume = $name }
+  $found[$letter] = ($letter + ':|Unlocked|Off|FullyDecrypted|0|' + (Clean $volume) + '||')
+}
+if ($found.Count -eq 0) {
+  if (-not (Test-Path -LiteralPath $bde)) { Save 'error:Windows could not read BitLocker on this PC.' }
   else { Save 'none' }
 } else {
-  Save ($lines -join [char]10)
+  $rows = $found.Keys | Sort-Object | ForEach-Object { $found[$_] }
+  Save ($rows -join [char]10)
 }
 "#;
-    let text = capture_ps_wait(body, elevate, 25)?;
+    let text = capture_ps_wait(body, elevate, 40)?;
     if text == "none" {
         return Ok(Vec::new());
     }

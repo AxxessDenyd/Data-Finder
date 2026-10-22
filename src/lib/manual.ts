@@ -10,7 +10,7 @@ export const aboutInfo = {
   created: "October 2026",
   author: "William Schneider",
   updated: "October 20, 2026",
-  version: "0.2.16",
+  version: "0.2.17",
   latest: "https://github.com/AxxessDenyd/Data-Finder/releases/latest",
   setup: "https://github.com/AxxessDenyd/Data-Finder/releases/latest/download/Data-Finder-Setup.exe",
   portable: "https://github.com/AxxessDenyd/Data-Finder/releases/latest/download/Data-Finder.exe",
@@ -140,7 +140,7 @@ export const manualSections: ManualSection[] = [
   {
     title: "Decryption",
     items: [
-      "Decryption is the tab between Recovery and Help. It reads BitLocker with Windows' own tool, one drive at a time. A Key ID is the eight characters from that tool. If a read fails, the drives already listed stay on screen. Refresh tries again. A read that takes too long is stopped so the next one can start.",
+      "Decryption is the tab between Recovery and Help. Scan for drives looks up every local drive, including a locked BitLocker drive. Opening the tab does not scan. A Key ID is the eight characters from Windows. If a read fails, the drives already listed stay on screen. Scan again tries another pass.",
       "A locked drive shows its Key ID, eight characters. That is the same ID as on the blue BitLocker screen. Copy it and match it to the recovery key. The key for a different ID will not open the drive. Unlock still needs the recovery key, password, or key file. Data Finder does not guess or break a missing key.",
       "Where to find the key lists Personal, School, Work, Active Directory, Intune, and No key at all. A recovery key is 48 digits. The blue BitLocker screen shows a Key ID of eight characters, and the key has to match that ID.",
       "Personal keys are on the Microsoft account that was used on that PC, or on a printed page, a USB stick, or a saved text file. School and work keys are held by that organization's help desk. Active Directory stores a key on the computer object when Group Policy saved it. Intune stores a key when the disk encryption policy saves it to Entra ID. An admin reads it. A student or employee usually cannot.",

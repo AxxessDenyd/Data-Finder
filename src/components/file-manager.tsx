@@ -3339,12 +3339,12 @@ function DecryptionPage() {
   const [key, setKey] = useState("");
   const [keyDrive, setKeyDrive] = useState("");
   const [asked, setAsked] = useState(false);
-  const [checking, setChecking] = useState(() => (isDesktop() ? "Checking drives for BitLocker…" : ""));
+  const [checking, setChecking] = useState("");
   const loadGen = useRef(0);
   const load = (elevate: boolean) => {
     const ticket = loadGen.current + 1;
     loadGen.current = ticket;
-    const text = elevate ? "Checking drives for BitLocker. Windows may ask for permission." : "Checking drives for BitLocker…";
+    const text = elevate ? "Scanning for drives. Windows may ask for permission." : "Scanning for drives…";
     setChecking(text);
     if (useFiles.getState().tab === "decrypt") useFiles.setState({ status: text });
     void bitlockerStatus(elevate).then((items) => {
@@ -3353,7 +3353,7 @@ function DecryptionPage() {
       setError("");
       setLetter((current) => current && items.some((item) => item.letter === current) ? current : items[0]?.letter ?? "");
       if (useFiles.getState().tab === "decrypt") {
-        useFiles.setState({ status: items.length === 0 ? "No BitLocker drive was found" : `BitLocker checked · ${items.length} drive${items.length === 1 ? "" : "s"}` });
+        useFiles.setState({ status: items.length === 0 ? "No drive was found" : `Scan finished · ${items.length} drive${items.length === 1 ? "" : "s"}` });
       }
     }).catch((cause: unknown) => {
       if (ticket !== loadGen.current) return;
@@ -3365,15 +3365,6 @@ function DecryptionPage() {
       if (ticket === loadGen.current) setChecking("");
     });
   };
-  useEffect(() => {
-    if (isDesktop()) {
-      load(false);
-      return;
-    }
-    setChecking("Checking drives for BitLocker…");
-    const timer = window.setTimeout(() => setChecking(""), 1800);
-    return () => window.clearTimeout(timer);
-  }, []);
   const current = rows?.find((item) => item.letter === letter) ?? null;
   const locked = current?.lock === "Locked";
   const encrypted = current ? stillEncrypted(current) : false;
@@ -3393,13 +3384,7 @@ function DecryptionPage() {
     return (
       <div className="flex min-h-0 flex-1 flex-col overflow-auto p-4">
         <h2 className="text-lg font-semibold">Decryption</h2>
-        <p className="mt-1 max-w-3xl text-sm text-muted">Unlock, decrypt, and turn BitLocker on run in the Windows program. A locked drive shows its Key ID there. The example below is the eight characters you match to a recovery key.</p>
-        {checking && (
-          <p className="mt-3 flex items-center gap-2 text-sm" role="status" aria-live="polite">
-            <RefreshCw className="size-4 animate-spin" />
-            {checking}
-          </p>
-        )}
+        <p className="mt-1 max-w-3xl text-sm text-muted">Unlock, decrypt, and turn BitLocker on run in the Windows program. Scan for drives there. A locked drive shows its Key ID. The example below is the eight characters you match to a recovery key.</p>
         <div className="mt-4 max-w-xl border border-line p-3">
           <p className="text-sm font-semibold">Example</p>
           <p className="mt-1 text-sm">This drive is locked. Enter the key that belongs to it.</p>
@@ -3412,7 +3397,7 @@ function DecryptionPage() {
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-auto p-4">
       <h2 className="text-lg font-semibold">Decryption</h2>
-      <p className="mt-1 max-w-3xl text-sm text-muted">A locked drive opens when you enter its recovery key, password, or key file. Data Finder does not guess that key. If you do not have it, use Where to find the key. If Windows already unlocked the drive, Decrypt removes BitLocker and leaves the files in place.</p>
+      <p className="mt-1 max-w-3xl text-sm text-muted">Scan looks for every local drive, including a locked BitLocker drive. It does not run when you open this tab. A locked drive opens when you enter its recovery key, password, or key file. Data Finder does not guess that key. If Windows already unlocked the drive, Decrypt removes BitLocker and leaves the files in place.</p>
       {error && <p className="mt-3 text-sm text-danger">{error}</p>}
       {checking && (
         <p className="mt-3 flex items-center gap-2 text-sm" role="status" aria-live="polite">
@@ -3422,17 +3407,19 @@ function DecryptionPage() {
       )}
       {error && !asked && <button type="button" className="mt-2 min-h-11 self-start border border-line px-3 text-sm" onClick={() => { setAsked(true); load(true); }}>Give Windows permission</button>}
       <div className="mt-4 flex flex-wrap items-end gap-3">
-        <label className="text-sm">
-          <span className="mb-1 block text-muted">Drive</span>
-          <select value={letter} onChange={(e) => { setLetter(e.target.value); setKey(""); setNote(""); }} aria-label="BitLocker drive" className="h-9 min-w-24 rounded-md border border-line bg-pane px-2">
-            {(rows ?? []).map((item) => <option key={item.letter} value={item.letter}>{item.letter}:</option>)}
-          </select>
-        </label>
-        <button type="button" className="h-9 rounded-md border border-line px-3 text-sm disabled:opacity-40" disabled={!!checking} onClick={() => load(false)}>Refresh</button>
+        {rows && rows.length > 0 && (
+          <label className="text-sm">
+            <span className="mb-1 block text-muted">Drive</span>
+            <select value={letter} onChange={(e) => { setLetter(e.target.value); setKey(""); setNote(""); }} aria-label="BitLocker drive" className="h-9 min-w-24 rounded-md border border-line bg-pane px-2">
+              {rows.map((item) => <option key={item.letter} value={item.letter}>{item.letter}:</option>)}
+            </select>
+          </label>
+        )}
+        <button type="button" className="h-9 rounded-md bg-accent px-3 text-sm text-accent-ink disabled:opacity-40" disabled={!!checking} onClick={() => load(false)}>{checking ? "Scanning…" : rows === null ? "Scan for drives" : "Scan again"}</button>
         {current && <p className="pb-1 text-sm">{driveWords(current)}{current.volume ? ` · ${current.volume}` : ""}</p>}
       </div>
-      {rows === null && !error && !checking && <p className="mt-4 text-sm text-muted">Reading drives…</p>}
-      {rows?.length === 0 && !error && <p className="mt-4 text-sm text-muted">Windows did not report a BitLocker drive.</p>}
+      {rows === null && !error && !checking && <p className="mt-4 text-sm text-muted">Nothing is scanned yet. Scan for drives when you want the list.</p>}
+      {rows?.length === 0 && !error && <p className="mt-4 text-sm text-muted">No local drive was found. Scan again after you plug the drive in.</p>}
       {current && locked && (
         <form className="mt-4 max-w-xl" onSubmit={(e) => { e.preventDefault(); run(bitlockerUnlock(current.letter, mode, secret)); }}>
           <p className="text-sm">This drive is locked. Enter the key that belongs to it.</p>
