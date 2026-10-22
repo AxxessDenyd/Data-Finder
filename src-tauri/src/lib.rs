@@ -3,6 +3,7 @@ use std::fs::{self, File};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use tauri::Emitter;
 
 mod recover;
 
@@ -1688,10 +1689,27 @@ fn recovery_digits(raw: &str) -> Result<String, String> {
 }
 
 fn capture_ps(body: &str, elevate: bool) -> Result<String, String> {
-    capture_ps_wait(body, elevate, 0)
+    capture_ps_wait(body, elevate, 0, None)
 }
 
-fn capture_ps_wait(body: &str, elevate: bool, timeout_secs: u64) -> Result<String, String> {
+fn read_progress(path: &Path) -> Option<(u32, u32, String)> {
+    let text = fs::read_to_string(path).ok()?;
+    let mut parts = text.trim().splitn(3, '|');
+    let done = parts.next()?.trim().parse().ok()?;
+    let total = parts.next()?.trim().parse().ok()?;
+    if total == 0 {
+        return None;
+    }
+    let label = parts.next().unwrap_or("").trim().to_string();
+    Some((done.min(total), total, label))
+}
+
+fn capture_ps_wait(
+    body: &str,
+    elevate: bool,
+    timeout_secs: u64,
+    mut on_progress: Option<&mut dyn FnMut(u32, u32, String)>,
+) -> Result<String, String> {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -1702,8 +1720,10 @@ fn capture_ps_wait(body: &str, elevate: bool, timeout_secs: u64) -> Result<Strin
         let dir = std::env::temp_dir();
         let script_path = dir.join(format!("df-bitlocker-{stamp}.ps1"));
         let result_path = dir.join(format!("df-bitlocker-{stamp}.txt"));
+        let progress_path = dir.join(format!("df-bitlocker-{stamp}.prog"));
         let script_text = script_path.to_string_lossy().to_string();
         let result_text = result_path.to_string_lossy().to_string();
+        let progress_text = progress_path.to_string_lossy().to_string();
         let quoted = ps_quote(&result_text).map_err(|_| "Could not start that BitLocker step".to_string())?;
         let full = format!(
             "$dfResult = {quoted}\nfunction Save([string]$text) {{ Set-Content -LiteralPath $dfResult -Value $text -Encoding ascii }}\n$ErrorActionPreference = 'Stop'\ntry {{\n"
@@ -1737,6 +1757,7 @@ try {
             .args(["-NoProfile", "-NonInteractive", "-Command", outer])
             .env("DF_SCRIPT", &script_text)
             .env("DF_ELEVATE", if elevate { "yes" } else { "no" })
+            .env("DF_PROGRESS", &progress_text)
             .creation_flags(0x08000000)
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
@@ -1746,17 +1767,30 @@ try {
         std::thread::spawn(move || {
             let _ = tx.send(child.wait_with_output());
         });
-        let waited = if timeout_secs == 0 {
-            rx.recv().map_err(|_| "Windows did not finish that BitLocker step".to_string())?
-        } else {
-            match rx.recv_timeout(std::time::Duration::from_secs(timeout_secs)) {
-                Ok(result) => result,
-                Err(_) => {
-                    let _ = Command::new("taskkill")
-                        .args(["/PID", &pid.to_string(), "/T", "/F"])
-                        .creation_flags(0x08000000)
-                        .output();
-                    return Err("BitLocker took too long and was stopped. Refresh to try again.".into());
+        let started = std::time::Instant::now();
+        let mut last_progress = String::new();
+        let waited = loop {
+            if timeout_secs > 0 && started.elapsed() >= std::time::Duration::from_secs(timeout_secs) {
+                let _ = Command::new("taskkill")
+                    .args(["/PID", &pid.to_string(), "/T", "/F"])
+                    .creation_flags(0x08000000)
+                    .output();
+                return Err("BitLocker took too long and was stopped. Refresh to try again.".into());
+            }
+            if let Some(callback) = on_progress.as_mut() {
+                if let Some((done, total, label)) = read_progress(&progress_path) {
+                    let key = format!("{done}|{total}|{label}");
+                    if key != last_progress {
+                        last_progress = key;
+                        callback(done, total, label);
+                    }
+                }
+            }
+            match rx.recv_timeout(std::time::Duration::from_millis(200)) {
+                Ok(result) => break result,
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                    return Err("Windows did not finish that BitLocker step".into());
                 }
             }
         };
@@ -1764,6 +1798,7 @@ try {
         let saved = fs::read_to_string(&result_path).unwrap_or_default();
         let _ = fs::remove_file(&script_path);
         let _ = fs::remove_file(&result_path);
+        let _ = fs::remove_file(&progress_path);
         let saved = saved.trim().to_string();
         let stdout = String::from_utf8_lossy(&output.stdout);
         if stdout.to_lowercase().contains("cancelled") {
@@ -1790,7 +1825,7 @@ try {
     }
     #[cfg(not(windows))]
     {
-        let _ = (body, elevate);
+        let _ = (body, elevate, on_progress);
         Err("BitLocker works in the Windows program".into())
     }
 }
@@ -1870,15 +1905,29 @@ fn drag_out(window: tauri::WebviewWindow, paths: Vec<String>) -> Result<(), Stri
     }
 }
 
+#[derive(Clone, Serialize)]
+struct BitLockerProgress {
+    done: u32,
+    total: u32,
+    label: String,
+}
+
 #[tauri::command]
-async fn bitlocker_status(elevate: bool) -> Result<Vec<BitLockerDrive>, String> {
-    tauri::async_runtime::spawn_blocking(move || bitlocker_status_blocking(elevate))
+async fn bitlocker_status(app: tauri::AppHandle, elevate: bool) -> Result<Vec<BitLockerDrive>, String> {
+    tauri::async_runtime::spawn_blocking(move || bitlocker_status_blocking(app, elevate))
         .await
         .map_err(|err| err.to_string())?
 }
 
-fn bitlocker_status_blocking(elevate: bool) -> Result<Vec<BitLockerDrive>, String> {
+fn bitlocker_status_blocking(app: tauri::AppHandle, elevate: bool) -> Result<Vec<BitLockerDrive>, String> {
     let body = r#"$ErrorActionPreference = 'Continue'
+function Step([int]$done, [int]$total, [string]$label) {
+  $path = $env:DF_PROGRESS
+  if (-not $path) { return }
+  $safe = ($label -replace '[|\r\n]', ' ')
+  try { Set-Content -LiteralPath $path -Value ($done.ToString() + '|' + $total.ToString() + '|' + $safe) -Encoding ascii } catch {}
+}
+Step 4 100 'Listing drives'
 function Take([string]$text, [string]$name) {
   $pattern = '(?m)^\s*' + [regex]::Escape($name) + ':\s*(.+)$'
   $match = [regex]::Match($text, $pattern)
@@ -1918,6 +1967,7 @@ function Keep([string]$letter, [string]$lock, [string]$prot, [string]$state, [in
   }
 }
 try {
+  Step 15 100 'Reading BitLocker'
   $vols = @(Get-BitLockerVolume -ErrorAction Stop)
 } catch { $vols = @() }
 if ($vols.Count -gt 0) { $saw = $true }
@@ -1949,6 +1999,7 @@ foreach ($vol in $vols) {
   }
   Keep $letter $lock $prot $state $pct $volume $ids
 }
+Step 42 100 'Reading encryption records'
 try {
   $enc = @(Get-CimInstance -Namespace 'root/CIMV2/Security/MicrosoftVolumeEncryption' -ClassName Win32_EncryptableVolume -ErrorAction Stop)
 } catch { $enc = @() }
@@ -1974,6 +2025,7 @@ foreach ($item in $enc) {
   if ($state -eq 'FullyDecrypted' -and ($prot -eq 'On' -or $pct -gt 0)) { $state = 'FullyEncrypted' }
   Keep $letter 'Unlocked' $prot $state $pct 'Data' ''
 }
+Step 58 100 'Reading drive status'
 $bde = Join-Path $env:SystemRoot 'System32\manage-bde.exe'
 function ReadBde([string[]]$bdeArgs) {
   if (-not (Test-Path -LiteralPath $bde)) { return '' }
@@ -1992,8 +2044,15 @@ function ReadBde([string[]]$bdeArgs) {
 }
 $raw = ReadBde @('-status')
 if ($raw -match 'Conversion Status') { $saw = $true }
-foreach ($hit in [regex]::Matches($raw, '(?s)Volume\s+([A-Za-z]):(.*?)(?=Volume\s+[A-Za-z]:|\z)')) {
+$hits = @([regex]::Matches($raw, '(?s)Volume\s+([A-Za-z]):(.*?)(?=Volume\s+[A-Za-z]:|\z)'))
+$hitCount = @($hits).Count
+$hitIndex = 0
+foreach ($hit in $hits) {
+  $hitIndex++
   $letter = $hit.Groups[1].Value.ToUpper()
+  $done = 58
+  if ($hitCount -gt 0) { $done = 58 + [int](($hitIndex * 32) / $hitCount) }
+  Step $done 100 ('Checking ' + $letter + ':')
   $chunk = $hit.Groups[2].Value
   $lock = 'Unlocked'
   if ((Take $chunk 'Lock Status') -match 'Locked') { $lock = 'Locked' }
@@ -2043,6 +2102,7 @@ foreach ($disk in $disks) {
   if ($saw) { Keep $letter 'Unlocked' 'Off' 'FullyDecrypted' 0 $volume '' }
   else { Keep $letter 'Unlocked' 'Off' 'Unknown' 0 $volume '' }
 }
+Step 100 100 'Finishing'
 if ($found.Count -eq 0) {
   if (-not (Test-Path -LiteralPath $bde)) { Save 'error:Windows could not read BitLocker on this PC.' }
   else { Save 'none' }
@@ -2051,7 +2111,12 @@ if ($found.Count -eq 0) {
   Save ($rows -join [char]10)
 }
 "#;
-    let text = capture_ps_wait(body, elevate, 40)?;
+    let text = capture_ps_wait(body, elevate, 40, Some(&mut |done, total, label| {
+        let _ = app.emit(
+            "bitlocker-progress",
+            BitLockerProgress { done, total, label },
+        );
+    }))?;
     if text == "none" {
         return Ok(Vec::new());
     }

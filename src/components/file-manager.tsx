@@ -3394,12 +3394,32 @@ function DecryptionPage() {
   const [keyDrive, setKeyDrive] = useState("");
   const [asked, setAsked] = useState(false);
   const [checking, setChecking] = useState("");
+  const [progress, setProgress] = useState<{ done: number; total: number; label: string } | null>(null);
   const loadGen = useRef(0);
+  useEffect(() => {
+    if (!isDesktop()) return;
+    let stop = false;
+    let unlisten: (() => void) | undefined;
+    void import("@tauri-apps/api/event").then(({ listen }) => {
+      if (stop) return;
+      void listen<{ done: number; total: number; label: string }>("bitlocker-progress", (event) => {
+        setProgress(event.payload);
+      }).then((fn) => {
+        if (stop) fn();
+        else unlisten = fn;
+      });
+    });
+    return () => {
+      stop = true;
+      unlisten?.();
+    };
+  }, []);
   const load = (elevate: boolean) => {
     const ticket = loadGen.current + 1;
     loadGen.current = ticket;
     const text = elevate ? "Scanning for drives. Windows may ask for permission." : "Scanning for drives…";
     setChecking(text);
+    setProgress({ done: 4, total: 100, label: "Listing drives" });
     if (useFiles.getState().tab === "decrypt") useFiles.setState({ status: text });
     void bitlockerStatus(elevate).then((items) => {
       if (ticket !== loadGen.current) return;
@@ -3416,7 +3436,10 @@ function DecryptionPage() {
       setRows((current) => current ?? []);
       if (useFiles.getState().tab === "decrypt") useFiles.setState({ status: message });
     }).finally(() => {
-      if (ticket === loadGen.current) setChecking("");
+      if (ticket === loadGen.current) {
+        setChecking("");
+        setProgress(null);
+      }
     });
   };
   const current = rows?.find((item) => item.letter === letter) ?? null;
@@ -3454,10 +3477,18 @@ function DecryptionPage() {
       <p className="mt-1 max-w-3xl text-sm text-muted">Scan looks for every local drive, including a locked BitLocker drive. It does not run when you open this tab. A locked drive opens when you enter its recovery key, password, or key file. Data Finder does not guess that key. If Windows already unlocked the drive, Decrypt removes BitLocker and leaves the files in place.</p>
       {error && <p className="mt-3 text-sm text-danger">{error}</p>}
       {checking && (
-        <p className="mt-3 flex items-center gap-2 text-sm" role="status" aria-live="polite">
-          <RefreshCw className="size-4 animate-spin" />
-          {checking}
-        </p>
+        <div className="mt-3 max-w-xl" role="status" aria-live="polite">
+          <div className="mb-1 flex items-center justify-between gap-3 text-sm">
+            <span className="flex items-center gap-2">
+              <RefreshCw className="size-4 animate-spin" />
+              {progress?.label || checking}
+            </span>
+            <span className="tabular-nums text-muted">{Math.min(100, Math.round(((progress?.done ?? 0) / (progress?.total || 100)) * 100))}%</span>
+          </div>
+          <div className="h-2 overflow-hidden rounded-full bg-bar-track" aria-hidden="true">
+            <div className="h-full rounded-full bg-bar transition-[width] duration-300" style={{ width: `${Math.min(100, Math.round(((progress?.done ?? 0) / (progress?.total || 100)) * 100))}%` }} />
+          </div>
+        </div>
       )}
       {error && !asked && <button type="button" className="mt-2 min-h-11 self-start border border-line px-3 text-sm" onClick={() => { setAsked(true); load(true); }}>Give Windows permission</button>}
       <div className="mt-4 flex flex-wrap items-end gap-3">
