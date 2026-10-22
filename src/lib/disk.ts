@@ -613,3 +613,7 @@ export async function bitlockerSaveKey(folder: string, drive: string, key: strin
 export async function chooseKeyFile(): Promise<string> {
   return invoke<string>("choose_key_file");
 }
+
+export async function dragOut(paths: string[]): Promise<void> {
+  await invoke("drag_out", { paths });
+}

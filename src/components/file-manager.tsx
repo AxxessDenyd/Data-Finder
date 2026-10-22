@@ -73,7 +73,7 @@ import {
   type ViewMode,
 } from "@/lib/file-store";
 import { childrenOf, driveCaption, formatDate, formatSize, pathIds, resolvePath, typeLabel, type FsNode } from "@/lib/vfs";
-import { bitlockerOff, bitlockerOn, bitlockerReadKey, bitlockerSaveKey, bitlockerStatus, bitlockerUnlock, chooseFolder, chooseKeyFile, diskPath, driveMask, earlierCopy, earlierEntries, earlierList, isDesktop, isDiskId, listSnapshots, mapNetwork, measurePath, mountVolume, openExternal, recoveryClear, recoverySave, recoveryStart, recoveryStatus, recoveryStop, removeSnapshot, restoreSetup, restoreSnapshot, restoreStatus, withoutDisk, type BitLockerDrive, type DiskSnapshot, type EarlierCopy, type EarlierEntry, type ExactSize, type RecoveryHit, type RecoveryStatus, type RestoreStatus } from "@/lib/disk";
+import { bitlockerOff, bitlockerOn, bitlockerReadKey, bitlockerSaveKey, bitlockerStatus, bitlockerUnlock, chooseFolder, chooseKeyFile, diskPath, dragOut, driveMask, earlierCopy, earlierEntries, earlierList, isDesktop, isDiskId, listSnapshots, mapNetwork, measurePath, mountVolume, openExternal, recoveryClear, recoverySave, recoveryStart, recoveryStatus, recoveryStop, removeSnapshot, restoreSetup, restoreSnapshot, restoreStatus, withoutDisk, type BitLockerDrive, type DiskSnapshot, type EarlierCopy, type EarlierEntry, type ExactSize, type RecoveryHit, type RecoveryStatus, type RestoreStatus } from "@/lib/disk";
 import { aboutInfo, manualSections } from "@/lib/manual";
 
 const UI_KEY = "data-finder-ui";
@@ -511,6 +511,57 @@ function Ribbon() {
 }
 
 const dragSelect = { moved: false };
+let desktopDragIds: string[] | null = null;
+
+function dragPaths(ids: string[]) {
+  const nodes = useFiles.getState().nodes;
+  return ids
+    .filter((id) => {
+      const node = nodes[id];
+      return node && (node.kind === "file" || node.kind === "dir");
+    })
+    .map((id) => diskPath(id))
+    .filter((path): path is string => Boolean(path));
+}
+
+function armDesktopDrag(event: ReactPointerEvent, index: 0 | 1, nodeId: string | null | undefined) {
+  if (!isDesktop() || event.button !== 0 || !nodeId) return;
+  const state = useFiles.getState();
+  const node = state.nodes[nodeId];
+  if (!node || (node.kind !== "file" && node.kind !== "dir")) return;
+  const selected = state.panes[index].selected;
+  const ids = selected.includes(nodeId) ? selected.filter((id) => dragPaths([id]).length) : [nodeId];
+  const paths = dragPaths(ids);
+  if (!paths.length) return;
+  event.stopPropagation();
+  const startX = event.clientX;
+  const startY = event.clientY;
+  const move = (ev: PointerEvent) => {
+    if (Math.hypot(ev.clientX - startX, ev.clientY - startY) < 8) return;
+    window.removeEventListener("pointermove", move);
+    window.removeEventListener("pointerup", up);
+    dragSelect.moved = true;
+    if (!useFiles.getState().panes[index].selected.includes(nodeId)) useFiles.getState().selectOnly(index, nodeId);
+    const liveIds = useFiles.getState().panes[index].selected.includes(nodeId) ? useFiles.getState().panes[index].selected : [nodeId];
+    const livePaths = dragPaths(liveIds);
+    useFiles.getState().setDrag(liveIds);
+    desktopDragIds = liveIds;
+    void dragOut(livePaths.length ? livePaths : paths)
+      .catch((cause: unknown) => useFiles.setState({ status: cause instanceof Error ? cause.message : "The drag did not start" }))
+      .finally(() => {
+        window.setTimeout(() => {
+          desktopDragIds = null;
+          useFiles.getState().setDrag(null);
+        }, 400);
+      });
+  };
+  const up = () => {
+    window.removeEventListener("pointermove", move);
+    window.removeEventListener("pointerup", up);
+  };
+  window.addEventListener("pointermove", move);
+  window.addEventListener("pointerup", up);
+}
 
 function freshName(base: string) {
   const state = useFiles.getState();
@@ -1172,6 +1223,7 @@ function IconBoard({ index, rows, mode }: { index: 0 | 1; rows: ListRow[]; mode:
           <div
             key={row.id}
             data-row={row.id}
+            onPointerDown={(event) => armDesktopDrag(event, index, row.nodeId)}
             className={
               "flex rounded-md " +
               (wide ? "items-center gap-2 px-2 py-1" : "flex-col items-center gap-1 px-2 py-2") +
@@ -1541,7 +1593,8 @@ function PaneView({ index }: { index: 0 | 1 }) {
                   <tr
                     key={row.id}
                     data-row={row.id}
-                    draggable={Boolean(row.nodeId)}
+                    draggable={!isDesktop() && Boolean(row.nodeId)}
+                    onPointerDown={(event) => armDesktopDrag(event, index, row.nodeId)}
                     aria-selected={selected}
                     className={
                       "file-row" +
@@ -3146,8 +3199,9 @@ function driveWords(drive: BitLockerDrive) {
   if (drive.lock === "Locked") return "Locked";
   if (drive.state === "DecryptionInProgress") return `Decrypting · ${drive.percent}%`;
   if (drive.state === "EncryptionInProgress") return `Encrypting · ${drive.percent}%`;
-  if (drive.state === "DecryptionPaused" || drive.state === "EncryptionPaused") return `Paused · ${drive.percent}% encrypted`;
+  if (drive.state === "DecryptionPaused" || drive.state === "EncryptionPaused" || drive.state === "Paused") return `Paused · ${drive.percent}% encrypted`;
   if (drive.state === "FullyEncrypted" || drive.protection === "On" || drive.percent > 0) return "Encrypted, and you can open it";
+  if (drive.state === "Unknown") return "Encryption was not read";
   return "Not encrypted";
 }
 
@@ -3418,6 +3472,18 @@ function DecryptionPage() {
         <button type="button" className="h-9 rounded-md bg-accent px-3 text-sm text-accent-ink disabled:opacity-40" disabled={!!checking} onClick={() => load(false)}>{checking ? "Scanning…" : rows === null ? "Scan for drives" : "Scan again"}</button>
         {current && <p className="pb-1 text-sm">{driveWords(current)}{current.volume ? ` · ${current.volume}` : ""}</p>}
       </div>
+      {rows && rows.length > 0 && (
+        <ul className="mt-3 max-w-xl">
+          {rows.map((item) => (
+            <li key={item.letter}>
+              <button type="button" className={"flex min-h-9 w-full items-center gap-2 rounded-md px-2 text-left text-sm " + (item.letter === letter ? "bg-select" : "hover:bg-header")} onClick={() => { setLetter(item.letter); setKey(""); setNote(""); }}>
+                <span className="w-8 font-semibold">{item.letter}:</span>
+                <span>{driveWords(item)}{item.volume ? ` · ${item.volume}` : ""}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
       {rows === null && !error && !checking && <p className="mt-4 text-sm text-muted">Nothing is scanned yet. Scan for drives when you want the list.</p>}
       {rows?.length === 0 && !error && <p className="mt-4 text-sm text-muted">No local drive was found. Scan again after you plug the drive in.</p>}
       {current && locked && (
@@ -3449,7 +3515,13 @@ function DecryptionPage() {
           </div>
         </div>
       )}
-      {current && !locked && !encrypted && (
+      {current && current.state === "Unknown" && !locked && (
+        <div className="mt-4 max-w-xl">
+          <p className="text-sm">This drive is on the list, but Windows did not say if it is encrypted. Give Windows permission, then scan again.</p>
+          {!asked && <button type="button" className="mt-3 min-h-11 border border-line px-3 text-sm" onClick={() => { setAsked(true); load(true); }}>Give Windows permission</button>}
+        </div>
+      )}
+      {current && !locked && !encrypted && current.state !== "Unknown" && (
         <div className="mt-4 max-w-xl">
           <p className="text-sm">This drive is not encrypted. Turn BitLocker on and Data Finder will show the recovery key. Save that key in a document that is not on this drive.</p>
           <button type="button" className="mt-3 min-h-11 bg-accent px-3 text-sm text-accent-ink disabled:opacity-40" disabled={busy} onClick={() => run(bitlockerOn(current.letter), (next) => { setKey(next); setKeyDrive(current.letter); setNote("BitLocker is on. Save this recovery key in a document."); })}>Turn on BitLocker</button>
@@ -3737,8 +3809,37 @@ export function FileManager() {
     };
     void look();
     const timer = window.setInterval(() => void look(), 2000);
+    let stopDrag = false;
+    let unlistenDrag: (() => void) | undefined;
+    void import("@tauri-apps/api/webview").then(({ getCurrentWebview }) => {
+      if (stopDrag) return;
+      void getCurrentWebview().onDragDropEvent((event) => {
+        if (event.payload.type !== "drop") return;
+        const ids = desktopDragIds ?? useFiles.getState().dragIds;
+        if (!ids?.length) return;
+        const point = event.payload.position;
+        const x = point.x / window.devicePixelRatio;
+        const y = point.y / window.devicePixelRatio;
+        const hit = document.elementFromPoint(x, y) ?? document.elementFromPoint(point.x, point.y);
+        const paneEl = hit?.closest("[data-pane]");
+        const paneIndex = paneEl?.getAttribute("data-pane") === "1" ? 1 : 0;
+        const rowId = hit?.closest("[data-row]")?.getAttribute("data-row") ?? "";
+        const state = useFiles.getState();
+        const rowNode = rowId ? state.nodes[rowId] : undefined;
+        let target = state.panes[paneIndex].pathId;
+        if (rowNode && (rowNode.kind === "dir" || rowNode.kind === "drive")) target = rowNode.id;
+        else if (rowNode?.parentId) target = rowNode.parentId;
+        if (!target || ids.includes(target)) return;
+        state.transferTo(ids, target, "move");
+      }).then((fn) => {
+        if (stopDrag) fn();
+        else unlistenDrag = fn;
+      }).catch(() => undefined);
+    }).catch(() => undefined);
     return () => {
       live = false;
+      stopDrag = true;
+      unlistenDrag?.();
       window.clearInterval(timer);
       clearLater();
     };

@@ -10,7 +10,7 @@ export const aboutInfo = {
   created: "October 2026",
   author: "William Schneider",
   updated: "October 20, 2026",
-  version: "0.2.17",
+  version: "0.2.18",
   latest: "https://github.com/AxxessDenyd/Data-Finder/releases/latest",
   setup: "https://github.com/AxxessDenyd/Data-Finder/releases/latest/download/Data-Finder-Setup.exe",
   portable: "https://github.com/AxxessDenyd/Data-Finder/releases/latest/download/Data-Finder.exe",
@@ -98,7 +98,7 @@ export const manualSections: ManualSection[] = [
     title: "Files and folders",
     items: [
       "Double-click or press Enter to open a folder or file. Backspace goes up. F5 refreshes. F2 renames. Delete asks before removing the selection.",
-      "Drag a row onto a folder or the other pane to move it. Hold Ctrl while you drop to copy.",
+      "Drag a row onto a folder or the other pane to move it. Hold Ctrl while you drop to copy. On the Windows program, drag a file or folder out of the window to copy it onto the desktop or into another folder.",
       "Paste asks when the name is already there: keep both, rename the old file, overwrite, update newer files, or skip.",
       "Right-click for Open, Cut, Copy, Paste, Rename, Delete, New folder, New file, Copy location, Info, Pin, Refresh, and Save snapshot. The menu stays on the screen.",
       "Double-click a file to open it in the program Windows uses for that kind of file, such as a photo viewer or a PDF reader. Double-click a folder to open it.",
@@ -140,7 +140,7 @@ export const manualSections: ManualSection[] = [
   {
     title: "Decryption",
     items: [
-      "Decryption is the tab between Recovery and Help. Scan for drives looks up every local drive, including a locked BitLocker drive. Opening the tab does not scan. A Key ID is the eight characters from Windows. If a read fails, the drives already listed stay on screen. Scan again tries another pass.",
+      "Decryption is the tab between Recovery and Help. Scan for drives does not run until you click it. The scan asks Windows whether each local drive is encrypted, including a locked BitLocker drive. If Windows does not answer, the drive says encryption was not read. Give Windows permission and scan again. Opening the tab does not scan.",
       "A locked drive shows its Key ID, eight characters. That is the same ID as on the blue BitLocker screen. Copy it and match it to the recovery key. The key for a different ID will not open the drive. Unlock still needs the recovery key, password, or key file. Data Finder does not guess or break a missing key.",
       "Where to find the key lists Personal, School, Work, Active Directory, Intune, and No key at all. A recovery key is 48 digits. The blue BitLocker screen shows a Key ID of eight characters, and the key has to match that ID.",
       "Personal keys are on the Microsoft account that was used on that PC, or on a printed page, a USB stick, or a saved text file. School and work keys are held by that organization's help desk. Active Directory stores a key on the computer object when Group Policy saved it. Intune stores a key when the disk encryption policy saves it to Entra ID. An admin reads it. A student or employee usually cannot.",

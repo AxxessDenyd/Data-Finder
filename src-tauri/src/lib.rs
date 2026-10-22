@@ -1838,6 +1838,39 @@ fn parse_bitlocker_line(line: &str) -> Option<BitLockerDrive> {
 }
 
 #[tauri::command]
+fn drag_out(window: tauri::WebviewWindow, paths: Vec<String>) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        let files: Vec<std::path::PathBuf> = paths
+            .into_iter()
+            .map(|path| path.trim().to_string())
+            .filter(|path| !path.is_empty())
+            .map(std::path::PathBuf::from)
+            .filter(|path| path.exists())
+            .collect();
+        if files.is_empty() {
+            return Err("That item is not on a drive this PC can drag.".into());
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        let host = window.clone();
+        window
+            .run_on_main_thread(move || {
+                let item = drag::DragItem::Files(files);
+                let image = drag::Image::Raw(include_bytes!("../icons/32x32.png").to_vec());
+                let started = drag::start_drag(&host, item, image, |_, _| {}, drag::Options::default());
+                let _ = tx.send(started.map_err(|err| err.to_string()));
+            })
+            .map_err(|err| err.to_string())?;
+        return rx.recv().map_err(|_| "The drag did not start.".to_string())?;
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (window, paths);
+        Err("Dragging onto the desktop works in the Windows program.".into())
+    }
+}
+
+#[tauri::command]
 async fn bitlocker_status(elevate: bool) -> Result<Vec<BitLockerDrive>, String> {
     tauri::async_runtime::spawn_blocking(move || bitlocker_status_blocking(elevate))
         .await
@@ -1854,8 +1887,8 @@ function Take([string]$text, [string]$name) {
 }
 function ShortState([string]$value) {
   $lower = $value.ToLower()
-  if ($lower -match 'fully encrypted') { return 'FullyEncrypted' }
-  if ($lower -match 'fully decrypted') { return 'FullyDecrypted' }
+  if ($lower -match 'decrypted' -and $lower -notmatch 'progress|paused') { return 'FullyDecrypted' }
+  if ($lower -match 'encrypted') { return 'FullyEncrypted' }
   if ($lower -match 'encryption in progress') { return 'EncryptionInProgress' }
   if ($lower -match 'decryption in progress') { return 'DecryptionInProgress' }
   if ($lower -match 'paused') { return 'Paused' }
@@ -1867,38 +1900,120 @@ function Clean([string]$value) {
   if (-not $value) { return '' }
   return (($value -replace '[|\r\n]', ' ').Trim())
 }
-$found = @{}
-$bde = Join-Path $env:SystemRoot 'System32\manage-bde.exe'
-$raw = ''
-if (Test-Path -LiteralPath $bde) {
-  try { $raw = (& $bde -status 2>&1 | Out-String) } catch { $raw = '' }
+function Rank([string]$line) {
+  if ($line -match '\|Locked\|') { return 4 }
+  if ($line -match 'FullyEncrypted|EncryptionInProgress|DecryptionInProgress|Paused') { return 3 }
+  if ($line -match '\|On\|') { return 3 }
+  if ($line -match '\|Unknown\|') { return 1 }
+  return 2
 }
-$chunks = [regex]::Split([string]$raw, '(?m)(?=^Volume )')
-foreach ($chunk in $chunks) {
-  if ($chunk -notmatch '(?m)^Volume\s+([A-Za-z]):') { continue }
-  $letter = $Matches[1].ToUpper()
-  $lockText = Take $chunk 'Lock Status'
+$found = @{}
+$saw = $false
+function Keep([string]$letter, [string]$lock, [string]$prot, [string]$state, [int]$pct, [string]$volume, [string]$ids) {
+  if ($letter -notmatch '^[A-Za-z]$') { return }
+  $letter = $letter.ToUpper()
+  $line = ($letter + ':|' + $lock + '|' + $prot + '|' + $state + '|' + $pct + '|' + (Clean $volume) + '||' + $ids)
+  if (-not $script:found.ContainsKey($letter) -or (Rank $line) -ge (Rank $script:found[$letter])) {
+    $script:found[$letter] = $line
+  }
+}
+try {
+  $vols = @(Get-BitLockerVolume -ErrorAction Stop)
+} catch { $vols = @() }
+if ($vols.Count -gt 0) { $saw = $true }
+foreach ($vol in $vols) {
+  $mount = [string]$vol.MountPoint
+  if ($mount -notmatch '([A-Za-z]):') { continue }
+  $letter = $Matches[1]
   $lock = 'Unlocked'
-  if ($lockText -match 'Locked') { $lock = 'Locked' }
-  $protText = Take $chunk 'Protection Status'
+  if ([string]$vol.LockStatus -match 'Locked') { $lock = 'Locked' }
   $prot = 'Off'
-  if ($protText -match '(?i)\bOn\b') { $prot = 'On' }
-  $state = 'FullyDecrypted'
+  if ([string]$vol.ProtectionStatus -match 'On') { $prot = 'On' }
+  $state = ShortState ([string]$vol.VolumeStatus)
+  $pct = 0
+  try { $pct = [int]$vol.EncryptionPercentage } catch { $pct = 0 }
+  if ($state -eq 'FullyDecrypted' -and ($prot -eq 'On' -or $pct -gt 0 -or $lock -eq 'Locked')) { $state = 'FullyEncrypted' }
+  $volume = 'Data'
+  if ([string]$vol.VolumeType -match 'Operating') { $volume = 'Operating system' }
+  $ids = ''
+  if ($lock -eq 'Locked') {
+    $idList = New-Object System.Collections.Generic.List[string]
+    foreach ($kp in @($vol.KeyProtector)) {
+      $hex = (([string]$kp.KeyProtectorId) -replace '[{}-]', '').ToUpper()
+      if ($hex.Length -ge 8) {
+        $short = $hex.Substring(0, 8)
+        if (-not $idList.Contains($short)) { [void]$idList.Add($short) }
+      }
+    }
+    $ids = $idList -join ','
+  }
+  Keep $letter $lock $prot $state $pct $volume $ids
+}
+try {
+  $enc = @(Get-CimInstance -Namespace 'root/CIMV2/Security/MicrosoftVolumeEncryption' -ClassName Win32_EncryptableVolume -ErrorAction Stop)
+} catch { $enc = @() }
+if ($enc.Count -gt 0) { $saw = $true }
+foreach ($item in $enc) {
+  $drive = [string]$item.DriveLetter
+  if ($drive -notmatch '([A-Za-z])') { continue }
+  $letter = $Matches[1]
+  $conv = 0
+  $protNum = 0
+  $pct = 0
+  try { $conv = [int]$item.ConversionStatus } catch { $conv = 0 }
+  try { $protNum = [int]$item.ProtectionStatus } catch { $protNum = 0 }
+  try { $pct = [int]$item.EncryptionPercentage } catch { $pct = 0 }
+  $prot = 'Off'
+  if ($protNum -eq 1) { $prot = 'On' }
+  $state = 'Unknown'
+  if ($conv -eq 0) { $state = 'FullyDecrypted' }
+  elseif ($conv -eq 1) { $state = 'FullyEncrypted' }
+  elseif ($conv -eq 2) { $state = 'EncryptionInProgress' }
+  elseif ($conv -eq 3) { $state = 'DecryptionInProgress' }
+  elseif ($conv -eq 4 -or $conv -eq 5) { $state = 'Paused' }
+  if ($state -eq 'FullyDecrypted' -and ($prot -eq 'On' -or $pct -gt 0)) { $state = 'FullyEncrypted' }
+  Keep $letter 'Unlocked' $prot $state $pct 'Data' ''
+}
+$bde = Join-Path $env:SystemRoot 'System32\manage-bde.exe'
+function ReadBde([string[]]$bdeArgs) {
+  if (-not (Test-Path -LiteralPath $bde)) { return '' }
+  $stdout = Join-Path $env:TEMP ('df-bde-out-' + [guid]::NewGuid().ToString() + '.txt')
+  $stderr = Join-Path $env:TEMP ('df-bde-err-' + [guid]::NewGuid().ToString() + '.txt')
+  try {
+    Start-Process -FilePath $bde -ArgumentList $bdeArgs -Wait -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr | Out-Null
+    $text = ''
+    if (Test-Path -LiteralPath $stdout) { $text += [IO.File]::ReadAllText($stdout) }
+    if (Test-Path -LiteralPath $stderr) { $text += "`n" + [IO.File]::ReadAllText($stderr) }
+    return ($text -replace "`r`n", "`n" -replace "`r", "`n")
+  } catch { return '' }
+  finally {
+    Remove-Item -LiteralPath $stdout, $stderr -Force -ErrorAction SilentlyContinue
+  }
+}
+$raw = ReadBde @('-status')
+if ($raw -match 'Conversion Status') { $saw = $true }
+foreach ($hit in [regex]::Matches($raw, '(?s)Volume\s+([A-Za-z]):(.*?)(?=Volume\s+[A-Za-z]:|\z)')) {
+  $letter = $hit.Groups[1].Value.ToUpper()
+  $chunk = $hit.Groups[2].Value
+  $lock = 'Unlocked'
+  if ((Take $chunk 'Lock Status') -match 'Locked') { $lock = 'Locked' }
+  $prot = 'Off'
+  if ((Take $chunk 'Protection Status') -match '(?i)\bOn\b') { $prot = 'On' }
+  $state = 'Unknown'
   $stateText = Take $chunk 'Conversion Status'
   if ($stateText) { $state = ShortState $stateText }
-  elseif ($lock -eq 'Locked' -or $prot -eq 'On') { $state = 'FullyEncrypted' }
   $pct = 0
   $pctText = Take $chunk 'Percentage Encrypted'
   if ($pctText -match '(\d+)') { $pct = [int]$Matches[1] }
+  if ($state -eq 'FullyDecrypted' -and ($prot -eq 'On' -or $pct -gt 0 -or $lock -eq 'Locked')) { $state = 'FullyEncrypted' }
   $label = ''
-  if ($chunk -match '(?m)^Volume\s+[A-Za-z]:\s*\[([^\]]*)\]') { $label = Clean $Matches[1] }
+  if ($chunk -match '\[([^\]]+)\]') { $label = Clean $Matches[1] }
   $volume = 'Data'
-  if ($chunk -match '\[OS Volume\]' -or $label -match '^(?i)os$') { $volume = 'Operating system' }
-  elseif ($label) { $volume = $label }
+  if ($chunk -match 'OS Volume' -or $label -match '^(?i)os$') { $volume = 'Operating system' }
+  elseif ($label -and $label -ne 'OS Volume') { $volume = $label }
   $ids = ''
-  if ($lock -eq 'Locked' -and (Test-Path -LiteralPath $bde)) {
-    $idRaw = ''
-    try { $idRaw = (& $bde -protectors -get ($letter + ':') -type RecoveryPassword 2>&1 | Out-String) } catch { $idRaw = '' }
+  if ($lock -eq 'Locked') {
+    $idRaw = ReadBde @('-protectors', '-get', ($letter + ':'), '-type', 'RecoveryPassword')
     $idList = New-Object System.Collections.Generic.List[string]
     foreach ($item in [regex]::Matches($idRaw, '\{([0-9A-Fa-f\-]+)\}')) {
       $hex = ($item.Groups[1].Value -replace '-', '').ToUpper()
@@ -1909,7 +2024,7 @@ foreach ($chunk in $chunks) {
     }
     $ids = $idList -join ','
   }
-  $found[$letter] = ($letter + ':|' + $lock + '|' + $prot + '|' + $state + '|' + $pct + '|' + (Clean $volume) + '||' + $ids)
+  Keep $letter $lock $prot $state $pct $volume $ids
 }
 $disks = @()
 try { $disks = @(Get-CimInstance -ClassName Win32_LogicalDisk -Filter 'DriveType=2 OR DriveType=3' -ErrorAction Stop) } catch { $disks = @() }
@@ -1923,9 +2038,10 @@ foreach ($disk in $disks) {
   if ($found.ContainsKey($letter)) { continue }
   $name = Clean ([string]$disk.VolumeName)
   $volume = 'Data'
-  if ($disk.DriveType -eq 2) { $volume = 'Removable' }
+  if ([int]$disk.DriveType -eq 2) { $volume = 'Removable' }
   if ($name) { $volume = $name }
-  $found[$letter] = ($letter + ':|Unlocked|Off|FullyDecrypted|0|' + (Clean $volume) + '||')
+  if ($saw) { Keep $letter 'Unlocked' 'Off' 'FullyDecrypted' 0 $volume '' }
+  else { Keep $letter 'Unlocked' 'Off' 'Unknown' 0 $volume '' }
 }
 if ($found.Count -eq 0) {
   if (-not (Test-Path -LiteralPath $bde)) { Save 'error:Windows could not read BitLocker on this PC.' }
@@ -2216,7 +2332,8 @@ pub fn run() {
             bitlocker_on,
             bitlocker_read_key,
             bitlocker_save_key,
-            choose_key_file
+            choose_key_file,
+            drag_out
         ])
         .run(tauri::generate_context!())
         .expect("Data Finder failed to start");
