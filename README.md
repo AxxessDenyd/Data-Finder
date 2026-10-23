@@ -10,7 +10,7 @@ You may use the official Data Finder program. You may not copy, change, publish,
 
 ## Build on this PC
 
-The project stays private. GitHub is not used to build or test it.
+You can also build Data Finder on your own Windows PC. GitHub builds it when the project changes.
 
 Install these free tools once, then close and reopen any window you already had open:
 
