@@ -1504,7 +1504,27 @@ function PaneView({ index }: { index: 0 | 1 }) {
           const label = tabNode ? (tabNode.kind === "drive" ? driveCaption(tabNode) : tabNode.name) : "Folder";
           const on = tab.key === pane.tab;
           return (
-            <span key={tab.key} className={"flex h-8 max-w-40 shrink-0 items-center rounded-t-md " + (on ? "bg-pane text-ink" : "text-muted")}>
+            <span
+              key={tab.key}
+              className={"flex h-8 max-w-40 shrink-0 items-center rounded-t-md " + (on ? "bg-pane text-ink" : "text-muted")}
+              onMouseDown={(event) => { if (event.button === 1) event.preventDefault(); }}
+              onAuxClick={(event) => {
+                if (event.button !== 1) return;
+                event.preventDefault();
+                useFiles.getState().closeTab(index, tab.key);
+              }}
+              onDragOver={(event) => {
+                if (tabNode && tabNode.kind !== "file") event.preventDefault();
+              }}
+              onDrop={(event) => {
+                if (!tabNode || tabNode.kind === "file") return;
+                event.preventDefault();
+                event.stopPropagation();
+                const ids = useFiles.getState().dragIds;
+                if (!ids?.length) return;
+                useFiles.getState().transferTo(ids, tab.pathId, event.ctrlKey || event.metaKey ? "copy" : "move");
+              }}
+            >
               <button type="button" className="min-w-0 flex-1 truncate px-2 text-left text-xs" title={label} onClick={() => useFiles.getState().selectTab(index, tab.key)}>{label}</button>
               {pane.tabs.length > 1 && (
                 <button type="button" className="px-1 text-xs text-muted hover:text-ink" aria-label={`Close ${label}`} onClick={() => useFiles.getState().closeTab(index, tab.key)}>×</button>
@@ -4089,9 +4109,16 @@ export function FileManager() {
       if (e.key === "Enter" && tag === "BUTTON") return;
       const index = store.active;
       const visible = listing(store, index).rows.map((row) => row.id);
-      if (e.key === "Backspace" || (e.altKey && e.key === "ArrowUp")) {
+      if (e.key === "Backspace") {
+        e.preventDefault();
+        if (store.panes[index].back.length) store.goBack(index);
+        else store.goUp();
+      } else if (e.altKey && e.key === "ArrowUp") {
         e.preventDefault();
         store.goUp();
+      } else if (e.altKey && (e.key === "d" || e.key === "D")) {
+        e.preventDefault();
+        window.dispatchEvent(new Event("datafinder-path"));
       } else if (e.altKey && e.key === "ArrowLeft") {
         e.preventDefault();
         store.goBack(index);
@@ -4150,6 +4177,17 @@ export function FileManager() {
           store.selectOnly(index, rows[hit].id);
           revealRow(index, hit);
           useFiles.setState({ status: `Jump to ${typedName}` });
+        }
+      } else if ((e.ctrlKey || e.metaKey) && e.key === "Tab") {
+        e.preventDefault();
+        const tabs = store.panes[index].tabs ?? [];
+        if (tabs.length > 1) {
+          const at = Math.max(0, tabs.findIndex((item) => item.key === store.panes[index].tab));
+          const step = e.shiftKey ? -1 : 1;
+          const next = tabs[(at + step + tabs.length) % tabs.length];
+          store.selectTab(index, next.key);
+        } else if (store.split) {
+          store.setActive(store.active === 0 ? 1 : 0);
         }
       } else if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === "t") {
         e.preventDefault();

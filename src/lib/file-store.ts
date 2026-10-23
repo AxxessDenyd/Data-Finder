@@ -122,6 +122,8 @@ export interface SearchRequest {
 export interface FolderTab {
   key: string;
   pathId: string;
+  back: string[];
+  forward: string[];
 }
 
 export interface PaneModel {
@@ -301,7 +303,7 @@ const defaultFilters: Filters = {
 };
 
 function freshTab(pathId: string): FolderTab {
-  return { key: `t${Date.now().toString(36)}${Math.floor(Math.random() * 1296).toString(36)}`, pathId };
+  return { key: `t${Date.now().toString(36)}${Math.floor(Math.random() * 1296).toString(36)}`, pathId, back: [], forward: [] };
 }
 
 function withTabs(pane: PaneModel): PaneModel {
@@ -309,6 +311,14 @@ function withTabs(pane: PaneModel): PaneModel {
   const tab = tabs.some((item) => item.key === pane.tab) ? pane.tab : tabs[0].key;
   const pathId = tabs.find((item) => item.key === tab)?.pathId ?? pane.pathId;
   return { ...pane, tabs, tab, pathId };
+}
+
+function rememberHistory(pane: PaneModel): PaneModel {
+  const ready = withTabs(pane);
+  return {
+    ...ready,
+    tabs: ready.tabs.map((item) => (item.key === ready.tab ? { ...item, pathId: ready.pathId, back: ready.back, forward: ready.forward } : item)),
+  };
 }
 
 function moveTab(pane: PaneModel, pathId: string): PaneModel {
@@ -1015,14 +1025,14 @@ export const useFiles = create<FileState & Actions>((set, get) => ({
     set((state) => {
       const panes = [...state.panes] as [PaneModel, PaneModel];
       const current = panes[index];
-      panes[index] = {
+      panes[index] = rememberHistory({
         ...moveTab(current, id),
         selected: [],
         anchor: null,
         back: push && current.pathId !== id ? [...current.back, current.pathId].slice(-50) : current.back,
         forward: push ? [] : current.forward,
         notice: "",
-      };
+      });
       return {
         panes,
         active: index,
@@ -1059,13 +1069,13 @@ export const useFiles = create<FileState & Actions>((set, get) => ({
       const paneState = panes[i];
       const target = paneState.back[paneState.back.length - 1];
       if (!target) return {};
-      panes[i] = {
+      panes[i] = rememberHistory({
         ...moveTab(paneState, target),
         selected: [],
         anchor: null,
         back: paneState.back.slice(0, -1),
         forward: [...paneState.forward, paneState.pathId].slice(-50),
-      };
+      });
       return { panes, active: i, recent: remember(state.recent, target), status: displayPath(state, target) };
     });
     if (get().calcDirs) void get().calcSizes(i);
@@ -1080,13 +1090,13 @@ export const useFiles = create<FileState & Actions>((set, get) => ({
       const paneState = panes[i];
       const target = paneState.forward.at(-1);
       if (!target) return {};
-      panes[i] = {
+      panes[i] = rememberHistory({
         ...moveTab(paneState, target),
         selected: [],
         anchor: null,
         forward: paneState.forward.slice(0, -1),
         back: [...paneState.back, paneState.pathId].slice(-50),
-      };
+      });
       return { panes, active: i, recent: remember(state.recent, target), status: displayPath(state, target) };
     });
     if (get().calcDirs) void get().calcSizes(i);
@@ -1097,7 +1107,7 @@ export const useFiles = create<FileState & Actions>((set, get) => ({
     if (!node || node.kind === "file") return;
     set((state) => {
       const panes = [...state.panes] as [PaneModel, PaneModel];
-      const current = withTabs(panes[index]);
+      const current = rememberHistory(withTabs(panes[index]));
       const tab = freshTab(id);
       const same = current.pathId === id;
       panes[index] = {
@@ -1107,8 +1117,8 @@ export const useFiles = create<FileState & Actions>((set, get) => ({
         pathId: id,
         selected: [],
         anchor: null,
-        back: same ? current.back : [...current.back, current.pathId].slice(-50),
-        forward: same ? current.forward : [],
+        back: [],
+        forward: [],
         notice: "",
       };
       return { panes, active: index, status: same ? "New tab" : displayPath(state, id) };
@@ -1117,26 +1127,45 @@ export const useFiles = create<FileState & Actions>((set, get) => ({
   },
 
   selectTab: (index, key) => {
-    const next = withTabs(get().panes[index]).tabs.find((item) => item.key === key);
+    const current = rememberHistory(withTabs(get().panes[index]));
+    const next = current.tabs.find((item) => item.key === key);
     if (!next || !get().nodes[next.pathId]) return;
     set((state) => {
       const panes = [...state.panes] as [PaneModel, PaneModel];
-      const current = withTabs(panes[index]);
-      panes[index] = { ...current, tab: key, pathId: next.pathId, selected: [], anchor: null, notice: "" };
+      panes[index] = {
+        ...current,
+        tab: key,
+        pathId: next.pathId,
+        back: next.back ?? [],
+        forward: next.forward ?? [],
+        selected: [],
+        anchor: null,
+        notice: "",
+      };
       return { panes, active: index, status: displayPath(state, next.pathId) };
     });
   },
 
   closeTab: (index, key) => {
-    const current = withTabs(get().panes[index]);
+    const current = rememberHistory(withTabs(get().panes[index]));
     if (current.tabs.length < 2) return;
     const tabs = current.tabs.filter((item) => item.key !== key);
     const tab = current.tab === key ? tabs[tabs.length - 1].key : current.tab;
-    const pathId = tabs.find((item) => item.key === tab)?.pathId ?? current.pathId;
+    const next = tabs.find((item) => item.key === tab);
+    const pathId = next?.pathId ?? current.pathId;
     if (!get().nodes[pathId]) return;
     set((state) => {
       const panes = [...state.panes] as [PaneModel, PaneModel];
-      panes[index] = { ...withTabs(panes[index]), tabs, tab, pathId, selected: [], anchor: null };
+      panes[index] = {
+        ...current,
+        tabs,
+        tab,
+        pathId,
+        back: next?.back ?? [],
+        forward: next?.forward ?? [],
+        selected: [],
+        anchor: null,
+      };
       return { panes, active: index, status: displayPath(state, pathId) };
     });
   },
@@ -2752,7 +2781,7 @@ function sortRows(rows: ListRow[], key: SortKey, dir: "asc" | "desc") {
     if (key === "size") return ((a.bytes ?? -1) - (b.bytes ?? -1)) * sign;
     if (key === "date") return (a.modified - b.modified) * sign;
     if (key === "type") return a.kind.localeCompare(b.kind) * sign || a.name.localeCompare(b.name);
-    return a.name.localeCompare(b.name, undefined, { sensitivity: "base" }) * sign;
+    return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" }) * sign;
   });
   return rows;
 }

@@ -11,7 +11,7 @@ export const aboutInfo = {
   author: "William Schneider",
   rights: "Copyright 2026 William Schneider. All rights reserved.",
   updated: "October 23, 2026",
-  version: "0.2.21",
+  version: "0.2.22",
   releases: "https://github.com/AxxessDenyd/Data-Finder/releases",
   latest: "https://github.com/AxxessDenyd/Data-Finder/releases/latest",
   setup: "https://github.com/AxxessDenyd/Data-Finder/releases/latest/download/Data-Finder-Setup.exe",
@@ -100,7 +100,7 @@ export const manualSections: ManualSection[] = [
   {
     title: "Files and folders",
     items: [
-      "Double-click or press Enter to open a folder or file. Backspace goes up. F5 refreshes. F2 renames. Delete asks before removing the selection.",
+      "Double-click or press Enter to open a folder or file. Backspace goes back, or up if you have not gone anywhere yet. F5 refreshes. F2 renames. Delete asks before removing the selection.",
       "Drag a row onto a folder or the other pane to move it. Hold Ctrl while you drop to copy. On the Windows program, drag a file or folder out of the window to copy it onto the desktop or into another folder.",
       "Paste asks when the name is already there: keep both, rename the old file, overwrite, update newer files, or skip.",
       "Right-click for Open, Cut, Copy, Paste, Rename, Delete, New folder, New file, Copy location, Info, Pin, Refresh, and Save snapshot. The menu stays on the screen.",
@@ -121,9 +121,9 @@ export const manualSections: ManualSection[] = [
   {
     title: "Keys",
     items: [
-      "Enter opens. Backspace or Alt+Up goes up. Alt+Left goes back. Alt+Right goes forward. F5 refreshes. F2 renames. Delete removes. Home and End jump to the first and last name.",
-      "Type the start of a name to jump to it. Type the same letter again to move to the next match. Ctrl+L edits the path.",
-      "Ctrl+T opens another folder tab. Ctrl+W closes it. Right-click a folder and choose Open in new tab, or hold Ctrl and double-click it. Each pane keeps its own tabs.",
+      "Enter opens. Backspace goes back, or up when there is nowhere to go back. Alt+Up goes up. Alt+Left goes back. Alt+Right goes forward. F5 refreshes. F2 renames. Delete removes. Home and End jump to the first and last name.",
+      "Type the start of a name to jump to it. Names sort the way you count, so 2 comes before 10. Type the same letter again to move to the next match. Ctrl+L or Alt+D edits the path.",
+      "Ctrl+T opens another folder tab. Ctrl+Tab moves to the next tab, and Ctrl+Shift+Tab moves to the previous one. Ctrl+W or a middle-click closes a tab. Each tab keeps its own Back and Forward. Drop a file on a tab to put it in that folder. Right-click a folder and choose Open in new tab, or hold Ctrl and double-click it. Each pane keeps its own tabs.",
       "The preview pane shows a picture, or the start of a text file, beside the list. Turn it on from View, then Preview pane.",
       "Ctrl+C, Ctrl+X, and Ctrl+V copy, cut, and paste. Ctrl+A selects the folder. Ctrl+Shift+C copies the location.",
       "Ctrl+F opens Find. Ctrl+Shift+F starts a deep search. Ctrl+Shift+N makes a folder.",
