@@ -46,18 +46,28 @@ jobs:
           name: Data-Finder-Windows
           path: windows-out/*
           if-no-files-found: error
-      - name: Publish the latest release
+      - name: Publish this version and keep older ones
         env:
           GH_TOKEN: ${{ github.token }}
         shell: pwsh
         run: |
-          gh release delete latest --yes --cleanup-tag 2>$null
-          gh release create latest `
-            "windows-out/Data-Finder-Setup.exe" `
-            "windows-out/Data-Finder.exe" `
-            --title "Latest" `
-            --notes "The current Data Finder installer and portable program." `
-            --latest
+          $version = (Get-Content -Raw "src-tauri/tauri.conf.json" | ConvertFrom-Json).version
+          $tag = "v$version"
+          $notes = "Data Finder $version. Older versions stay on the releases page."
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $tag "windows-out/Data-Finder-Setup.exe" "windows-out/Data-Finder.exe" --clobber
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            gh release edit $tag --latest --title "Data Finder $version" --notes $notes
+          } else {
+            gh release create $tag `
+              "windows-out/Data-Finder-Setup.exe" `
+              "windows-out/Data-Finder.exe" `
+              --title "Data Finder $version" `
+              --notes $notes `
+              --latest
+          }
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Put the program files in the repo
         shell: pwsh
         run: |

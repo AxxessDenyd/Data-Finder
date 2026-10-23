@@ -81,9 +81,31 @@ const CATALOG_KEY = "data-finder-catalog";
 const MB = 1024 * 1024;
 const NO_CHILDREN: string[] = [];
 
+function iconMetrics(mode: ViewMode, width: number) {
+  if (mode === "list") return { cols: 1, rowH: 36 };
+  if (mode === "content" || mode === "tiles") return { cols: 1, rowH: 56 };
+  const min = mode === "xlarge" ? 140 : mode === "small" ? 92 : mode === "large" ? 128 : 112;
+  const rowH = mode === "xlarge" ? 156 : mode === "large" ? 136 : mode === "small" ? 100 : 120;
+  return { cols: Math.max(1, Math.floor(Math.max(min, width) / min)), rowH };
+}
+
 function shownSize(bytes: number | null | undefined, approx?: boolean, blocked?: boolean) {
   if (blocked) return "No access";
   return formatSize(bytes);
+}
+
+let typedName = "";
+let typedAt = 0;
+
+function revealRow(index: 0 | 1, pos: number) {
+  const scroller = document.querySelector(`[data-pane="${index}"] [data-scroller]`) as HTMLElement | null;
+  if (!scroller || pos < 0) return;
+  const cols = Math.max(1, Number(scroller.getAttribute("data-cols") || 1));
+  const rowH = Number(scroller.getAttribute("data-row-h") || 36);
+  const top = Math.floor(pos / cols) * rowH;
+  const bottom = top + rowH;
+  if (top < scroller.scrollTop) scroller.scrollTop = top;
+  else if (bottom > scroller.scrollTop + scroller.clientHeight) scroller.scrollTop = bottom - scroller.clientHeight;
 }
 
 function shownName(name: string, kind: string, showExt: boolean) {
@@ -1042,6 +1064,7 @@ function AboutPage() {
             <button type="button" className="block text-accent underline" onClick={() => void openExternal(aboutInfo.latest)}>Project page</button>
             <button type="button" className="block text-accent underline" onClick={() => void openExternal(aboutInfo.setup)}>Data-Finder-Setup.exe</button>
             <button type="button" className="block text-accent underline" onClick={() => void openExternal(aboutInfo.portable)}>Data-Finder.exe</button>
+            <button type="button" className="block text-accent underline" onClick={() => void openExternal(aboutInfo.releases)}>Older versions</button>
           </dd>
         </div>
       </dl>
@@ -1205,7 +1228,7 @@ function TreeBranch({ id, depth, pane }: { id: string; depth: number; pane: 0 | 
   );
 }
 
-function IconBoard({ index, rows, mode }: { index: 0 | 1; rows: ListRow[]; mode: ViewMode }) {
+function IconBoard({ index, rows, mode, columns, cellHeight }: { index: 0 | 1; rows: ListRow[]; mode: ViewMode; columns?: number; cellHeight?: number }) {
   const nodes = useFiles((s) => s.nodes);
   const selectedIds = useFiles((s) => s.panes[index].selected);
   const showExt = useFiles((s) => s.showExt);
@@ -1213,8 +1236,12 @@ function IconBoard({ index, rows, mode }: { index: 0 | 1; rows: ListRow[]; mode:
   const clipboard = useFiles((s) => s.clipboard);
   const icon = mode === "xlarge" ? "size-16" : mode === "large" ? "size-12" : mode === "medium" ? "size-8" : "size-5";
   const wide = mode === "list" || mode === "content" || mode === "tiles";
+  const grid = !wide && columns ? { gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` } : undefined;
   return (
-    <div className={wide ? "flex flex-col gap-0.5 p-1" : "grid gap-1 p-2 " + (mode === "xlarge" ? "grid-cols-[repeat(auto-fill,minmax(132px,1fr))]" : mode === "small" ? "grid-cols-[repeat(auto-fill,minmax(84px,1fr))]" : "grid-cols-[repeat(auto-fill,minmax(104px,1fr))]")}>
+    <div
+      className={wide ? "flex flex-col gap-0.5 p-1" : "grid p-2 " + (cellHeight ? "gap-0" : "gap-1")}
+      style={grid}
+    >
       {rows.length === 0 && <p className="col-span-full px-3 py-8 text-center text-muted">This folder is empty.</p>}
       {rows.map((row) => {
         const selected = selectedIds.includes(row.id);
@@ -1226,11 +1253,12 @@ function IconBoard({ index, rows, mode }: { index: 0 | 1; rows: ListRow[]; mode:
             data-row={row.id}
             onPointerDown={(event) => armDesktopDrag(event, index, row.nodeId)}
             className={
-              "flex rounded-md " +
+              "flex overflow-hidden rounded-md " +
               (wide ? "items-center gap-2 px-2 py-1" : "flex-col items-center gap-1 px-2 py-2") +
               (selected ? " bg-select" : " hover:bg-header") +
               (cut ? " opacity-50" : "")
             }
+            style={!wide && cellHeight ? { height: cellHeight } : undefined}
           >
             {itemChecks && (
               <input
@@ -1367,7 +1395,21 @@ function PaneView({ index }: { index: 0 | 1 }) {
   const cols = { ...defaultColumns, ...state.columns };
   const rowHeight = state.compact ? 28 : 36;
   const scroller = useRef<HTMLDivElement>(null);
+  const [paneWidth, setPaneWidth] = useState(640);
   const [windowed, setWindowed] = useState({ start: 0, end: 80 });
+  const icon = iconMetrics(state.viewMode, paneWidth);
+  const unit = state.viewMode === "details" ? rowHeight : icon.rowH;
+  const stride = state.viewMode === "details" ? 1 : icon.cols;
+  useEffect(() => {
+    const onPath = () => {
+      if (useFiles.getState().active !== index) return;
+      const current = useFiles.getState();
+      setDraft(displayPath(current, current.panes[index].pathId));
+      setEditing(true);
+    };
+    window.addEventListener("datafinder-path", onPath);
+    return () => window.removeEventListener("datafinder-path", onPath);
+  }, [index]);
   useEffect(() => {
     const el = scroller.current;
     if (el) el.scrollTop = 0;
@@ -1377,9 +1419,11 @@ function PaneView({ index }: { index: 0 | 1 }) {
     const el = scroller.current;
     if (!el) return;
     const measure = () => {
-      const start = Math.max(0, Math.floor(el.scrollTop / rowHeight) - 12);
-      const count = Math.ceil(el.clientHeight / rowHeight) + 24;
-      const end = start + count;
+      setPaneWidth((width) => (Math.abs(width - el.clientWidth) > 16 ? el.clientWidth : width));
+      const startUnit = Math.max(0, Math.floor(el.scrollTop / unit) - 2);
+      const count = Math.ceil(el.clientHeight / unit) + 6;
+      const start = startUnit * stride;
+      const end = (startUnit + count) * stride;
       setWindowed((prev) => (prev.start === start && prev.end === end ? prev : { start, end }));
     };
     measure();
@@ -1390,8 +1434,8 @@ function PaneView({ index }: { index: 0 | 1 }) {
       el.removeEventListener("scroll", measure);
       observer.disconnect();
     };
-  }, [pane.pathId, state.viewMode, rowHeight, view.rows.length]);
-  const virtual = state.viewMode === "details" && view.rows.length > 80 && !band;
+  }, [pane.pathId, state.viewMode, unit, stride, view.rows.length]);
+  const virtual = view.rows.length > 80 && !band;
   const shownRows = virtual ? view.rows.slice(windowed.start, windowed.end) : view.rows;
   const tableWidth =
     cols.name +
@@ -1510,7 +1554,8 @@ function PaneView({ index }: { index: 0 | 1 }) {
         <div
           ref={scroller}
           data-scroller=""
-          data-row-h={rowHeight}
+          data-row-h={unit}
+          data-cols={stride}
           className="relative min-h-0 min-w-0 flex-1 overflow-auto"
           onPointerDown={(event) => {
             if (event.button !== 0) return;
@@ -1719,7 +1764,11 @@ function PaneView({ index }: { index: 0 | 1 }) {
             </tbody>
           </table>
           ) : (
-            <IconBoard index={index} rows={view.rows} mode={state.viewMode} />
+            <>
+            {virtual && windowed.start > 0 && <div aria-hidden="true" style={{ height: Math.floor(windowed.start / stride) * unit }} />}
+            <IconBoard index={index} rows={virtual ? shownRows : view.rows} mode={state.viewMode} columns={icon.cols} cellHeight={virtual ? icon.rowH : undefined} />
+            {virtual && windowed.end < view.rows.length && <div aria-hidden="true" style={{ height: Math.ceil((view.rows.length - windowed.end) / stride) * unit }} />}
+            </>
           )}
         </div>
         {state.detailsOpen && <DetailsStrip index={index} compact className={state.split ? "flex 2xl:hidden" : "flex lg:hidden"} />}
@@ -3981,9 +4030,26 @@ export function FileManager() {
       if (e.key === "Enter" && tag === "BUTTON") return;
       const index = store.active;
       const visible = listing(store, index).rows.map((row) => row.id);
-      if (e.key === "Backspace") {
+      if (e.key === "Backspace" || (e.altKey && e.key === "ArrowUp")) {
         e.preventDefault();
         store.goUp();
+      } else if (e.altKey && e.key === "ArrowLeft") {
+        e.preventDefault();
+        store.goBack(index);
+      } else if (e.altKey && e.key === "ArrowRight") {
+        e.preventDefault();
+        store.goForward(index);
+      } else if (e.key === "Home" || e.key === "End") {
+        e.preventDefault();
+        const pos = e.key === "Home" ? 0 : visible.length - 1;
+        const id = visible[pos];
+        if (id) {
+          store.selectOnly(index, id);
+          revealRow(index, pos);
+        }
+      } else if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === "l") {
+        e.preventDefault();
+        window.dispatchEvent(new Event("datafinder-path"));
       } else if (e.key === "F5") {
         e.preventDefault();
         store.refresh();
@@ -4002,14 +4068,29 @@ export function FileManager() {
         const dir = e.key === "ArrowDown" ? 1 : -1;
         store.moveSelection(index, dir, visible);
         const next = useFiles.getState().panes[index].selected[0];
-        const scroller = document.querySelector(`[data-pane="${index}"] [data-scroller]`) as HTMLElement | null;
-        const rowH = Number(scroller?.getAttribute("data-row-h") || 36);
-        const pos = next ? visible.indexOf(next) : -1;
-        if (scroller && pos >= 0) {
-          const top = pos * rowH;
-          const bottom = top + rowH;
-          if (top < scroller.scrollTop) scroller.scrollTop = top;
-          else if (bottom > scroller.scrollTop + scroller.clientHeight) scroller.scrollTop = bottom - scroller.clientHeight;
+        revealRow(index, next ? visible.indexOf(next) : -1);
+      } else if (!e.ctrlKey && !e.metaKey && !e.altKey && e.key.length === 1 && e.key !== " ") {
+        const now = performance.now();
+        if (now - typedAt > 800) typedName = "";
+        const cycling = typedName === e.key.toLowerCase();
+        typedName = cycling ? e.key.toLowerCase() : typedName + e.key.toLowerCase();
+        typedAt = now;
+        const rows = listing(store, index).rows;
+        const current = store.panes[index].selected[0];
+        const at = rows.findIndex((row) => row.id === current);
+        const from = cycling ? (at >= 0 ? at + 1 : 0) : 0;
+        let hit = -1;
+        for (let step = 0; step < rows.length; step += 1) {
+          const pos = (from + step) % rows.length;
+          if (rows[pos].name.toLowerCase().startsWith(typedName)) {
+            hit = pos;
+            break;
+          }
+        }
+        if (hit >= 0) {
+          store.selectOnly(index, rows[hit].id);
+          revealRow(index, hit);
+          useFiles.setState({ status: `Jump to ${typedName}` });
         }
       } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") {
         e.preventDefault();

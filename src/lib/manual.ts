@@ -10,8 +10,9 @@ export const aboutInfo = {
   created: "October 2026",
   author: "William Schneider",
   rights: "Copyright 2026 William Schneider. All rights reserved.",
-  updated: "October 20, 2026",
-  version: "0.2.19",
+  updated: "October 23, 2026",
+  version: "0.2.20",
+  releases: "https://github.com/AxxessDenyd/Data-Finder/releases",
   latest: "https://github.com/AxxessDenyd/Data-Finder/releases/latest",
   setup: "https://github.com/AxxessDenyd/Data-Finder/releases/latest/download/Data-Finder-Setup.exe",
   portable: "https://github.com/AxxessDenyd/Data-Finder/releases/latest/download/Data-Finder.exe",
@@ -30,12 +31,13 @@ export const manualSections: ManualSection[] = [
       "Data-Finder-Setup.exe installs Data Finder for the current Windows user. Double-click it and follow the steps.",
       "Data-Finder.exe is the portable program. Copy it to a flash drive and double-click it on any Windows PC. Nothing is installed.",
       "Close Data Finder before replacing either file, or Windows will say the file is in use.",
-      "The latest copies are on the project page. Use the links below.",
+      "The latest copies are on the project page. Older versions stay there too, so you can download an earlier build.",
     ],
     links: [
       { label: "Download the installer", href: "https://github.com/AxxessDenyd/Data-Finder/releases/latest/download/Data-Finder-Setup.exe" },
       { label: "Download the portable program", href: "https://github.com/AxxessDenyd/Data-Finder/releases/latest/download/Data-Finder.exe" },
       { label: "Latest release", href: "https://github.com/AxxessDenyd/Data-Finder/releases/latest" },
+      { label: "Older versions", href: "https://github.com/AxxessDenyd/Data-Finder/releases" },
     ],
   },
   {
@@ -119,7 +121,8 @@ export const manualSections: ManualSection[] = [
   {
     title: "Keys",
     items: [
-      "Enter opens. Backspace goes up. F5 refreshes. F2 renames. Delete removes.",
+      "Enter opens. Backspace or Alt+Up goes up. Alt+Left goes back. Alt+Right goes forward. F5 refreshes. F2 renames. Delete removes. Home and End jump to the first and last name.",
+      "Type the start of a name to jump to it. Type the same letter again to move to the next match. Ctrl+L edits the path.",
       "Ctrl+C, Ctrl+X, and Ctrl+V copy, cut, and paste. Ctrl+A selects the folder. Ctrl+Shift+C copies the location.",
       "Ctrl+F opens Find. Ctrl+Shift+F starts a deep search. Ctrl+Shift+N makes a folder.",
       "Alt+Enter opens Info. Escape closes a menu or a dialog.",
