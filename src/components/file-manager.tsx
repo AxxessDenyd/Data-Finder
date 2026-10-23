@@ -114,6 +114,45 @@ function shownName(name: string, kind: string, showExt: boolean) {
   return dot > 0 ? name.slice(0, dot) : name;
 }
 
+function NameEdit({ value, onDone }: { value: string; onDone: (next: string | null) => void }) {
+  const field = useRef<HTMLInputElement>(null);
+  const done = useRef(false);
+  useEffect(() => {
+    const input = field.current;
+    if (!input) return;
+    input.focus();
+    const dot = value.lastIndexOf(".");
+    input.setSelectionRange(0, dot > 0 ? dot : value.length);
+  }, [value]);
+  const finish = (next: string | null) => {
+    if (done.current) return;
+    done.current = true;
+    onDone(next);
+  };
+  return (
+    <input
+      ref={field}
+      defaultValue={value}
+      aria-label="Name"
+      className="h-7 w-full min-w-0 border border-accent bg-pane px-1 text-sm outline-none"
+      onPointerDown={(event) => event.stopPropagation()}
+      onClick={(event) => event.stopPropagation()}
+      onDoubleClick={(event) => event.stopPropagation()}
+      onKeyDown={(event) => {
+        event.stopPropagation();
+        if (event.key === "Enter") {
+          event.preventDefault();
+          finish(event.currentTarget.value);
+        } else if (event.key === "Escape") {
+          event.preventDefault();
+          finish(null);
+        }
+      }}
+      onBlur={(event) => finish(event.currentTarget.value)}
+    />
+  );
+}
+
 function FolderMark({ className = "size-4 shrink-0" }: { className?: string }) {
   return (
     <svg viewBox="0 0 24 24" width="16" height="16" className={className} aria-hidden="true">
@@ -755,10 +794,7 @@ function HomeRibbon() {
       <RibbonButton label="Cut" disabled={!selected.length} icon={<Scissors className="size-4" />} onClick={() => store().cut()} />
       <RibbonButton label="Copy" disabled={!selected.length} icon={<Copy className="size-4" />} onClick={() => store().copy()} />
       <RibbonButton label="Paste" icon={<ClipboardPaste className="size-4" />} onClick={() => store().paste()} />
-      <RibbonButton label="Rename" disabled={selected.length !== 1} icon={<Pencil className="size-4" />} onClick={() => {
-        const node = nodes[selected[0]];
-        if (node) store().openDialog({ kind: "rename", id: node.id, name: node.name });
-      }} />
+      <RibbonButton label="Rename" disabled={selected.length !== 1} icon={<Pencil className="size-4" />} onClick={() => window.dispatchEvent(new Event("datafinder-rename"))} />
       <RibbonButton label="Delete" disabled={!selected.length} icon={<Trash2 className="size-4" />} onClick={() => selected.length && store().openDialog({ kind: "delete", ids: selected })} />
       <SortMenu />
       <ViewMenu />
@@ -1228,7 +1264,7 @@ function TreeBranch({ id, depth, pane }: { id: string; depth: number; pane: 0 | 
   );
 }
 
-function IconBoard({ index, rows, mode, columns, cellHeight }: { index: 0 | 1; rows: ListRow[]; mode: ViewMode; columns?: number; cellHeight?: number }) {
+function IconBoard({ index, rows, mode, columns, cellHeight, namingId, namingValue, onName }: { index: 0 | 1; rows: ListRow[]; mode: ViewMode; columns?: number; cellHeight?: number; namingId?: string; namingValue?: string; onName?: (next: string | null) => void }) {
   const nodes = useFiles((s) => s.nodes);
   const selectedIds = useFiles((s) => s.panes[index].selected);
   const showExt = useFiles((s) => s.showExt);
@@ -1301,7 +1337,11 @@ function IconBoard({ index, rows, mode, columns, cellHeight }: { index: 0 | 1; r
             >
             <Icon node={{ kind: row.kind, name: row.name, note: row.note }} className={icon + " shrink-0"} />
             <span className={wide ? "min-w-0 flex-1" : "w-full"}>
+              {namingId === row.id && onName ? (
+                <NameEdit value={namingValue ?? ""} onDone={onName} />
+              ) : (
               <span className={"block truncate " + (wide ? "" : "text-xs")} title={row.name}>{label}</span>
+              )}
               {(mode === "content" || mode === "tiles") && (
                 <span className="block truncate text-xs text-muted">{typeLabel(row.nodeId && nodes[row.nodeId] ? nodes[row.nodeId] : ({ kind: row.kind, name: row.name } as FsNode))}</span>
               )}
@@ -1420,12 +1460,34 @@ function PaneView({ index }: { index: 0 | 1 }) {
   const [places, setPlaces] = useState(false);
   const [over, setOver] = useState(false);
   const [band, setBand] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
+  const [naming, setNaming] = useState<{ id: string; value: string } | null>(null);
+  const finishName = (next: string | null) => {
+    setNaming((current) => {
+      if (!current) return null;
+      const node = useFiles.getState().nodes[current.id];
+      if (next != null && node && next.trim() && next.trim() !== node.name) useFiles.getState().rename(current.id, next);
+      return null;
+    });
+  };
+  useEffect(() => {
+    const onRename = () => {
+      if (useFiles.getState().active !== index) return;
+      const id = useFiles.getState().panes[index].selected[0];
+      const node = id ? useFiles.getState().nodes[id] : undefined;
+      if (!node?.parentId || node.kind === "drive" || node.kind === "computer") return;
+      setNaming({ id: node.id, value: node.name });
+    };
+    window.addEventListener("datafinder-rename", onRename);
+    return () => window.removeEventListener("datafinder-rename", onRename);
+  }, [index]);
+  useEffect(() => setNaming(null), [pane.pathId]);
   const snap = { nodes, order };
   const drive = driveOf(snap, pane.pathId);
   const freePct = drive?.capacity ? Math.round(((drive.free ?? 0) / drive.capacity) * 100) : 0;
   const chain = pathIds(snap, pane.pathId);
   const max = barScale(view.rows);
   const hiddenCount = view.total - view.rows.length;
+  const picked = view.rows.filter((row) => pane.selected.includes(row.id));
   const md = useMinWidth(768);
   const lg = useMinWidth(1024);
   const cols = { ...defaultColumns, ...state.columns };
@@ -1791,9 +1853,13 @@ function PaneView({ index }: { index: 0 | 1 }) {
                         )}
                         <Icon node={{ kind: row.kind, name: row.name, note: row.note }} />
                         <span className="min-w-0 flex-1">
+                          {naming?.id === row.id ? (
+                            <NameEdit value={naming.value} onDone={finishName} />
+                          ) : (
                           <span className="block truncate" title={row.kind === "drive" && row.nodeId && nodes[row.nodeId] ? driveCaption(nodes[row.nodeId]) : row.name}>
                             {row.kind === "drive" && row.nodeId && nodes[row.nodeId] ? driveCaption(nodes[row.nodeId]) : shownName(row.name, row.kind, state.showExt)}
                           </span>
+                          )}
                           {row.path && <span className="block truncate text-xs text-muted" title={row.path}>{row.path}</span>}
                           {row.onlyHere && <span className="text-xs text-accent">Missing opposite</span>}
                           {row.dupe && <span className="text-xs text-accent">Twin size</span>}
@@ -1844,7 +1910,7 @@ function PaneView({ index }: { index: 0 | 1 }) {
           ) : (
             <>
             {virtual && windowed.start > 0 && <div aria-hidden="true" style={{ height: Math.floor(windowed.start / stride) * unit }} />}
-            <IconBoard index={index} rows={virtual ? shownRows : view.rows} mode={state.viewMode} columns={icon.cols} cellHeight={virtual ? icon.rowH : undefined} />
+            <IconBoard index={index} rows={virtual ? shownRows : view.rows} mode={state.viewMode} columns={icon.cols} cellHeight={virtual ? icon.rowH : undefined} namingId={naming?.id} namingValue={naming?.value} onName={finishName} />
             {virtual && windowed.end < view.rows.length && <div aria-hidden="true" style={{ height: Math.ceil((view.rows.length - windowed.end) / stride) * unit }} />}
             </>
           )}
@@ -1856,7 +1922,8 @@ function PaneView({ index }: { index: 0 | 1 }) {
       </div>
       <footer className="flex h-8 shrink-0 items-center gap-3 border-t border-line bg-status px-2 text-xs">
         <span className="min-w-0 flex-1 truncate">
-          {view.rows.filter((row) => pane.selected.includes(row.id)).length} of {view.rows.length} items selected
+          {picked.length} of {view.rows.length} items selected
+          {picked.length > 0 && picked.every((row) => typeof row.bytes === "number") ? ` · ${formatSize(picked.reduce((sum, row) => sum + (row.bytes ?? 0), 0))}` : ""}
           {hiddenCount > 0 ? ` · ${hiddenCount} filtered` : ""}
         </span>
         {!state.detailsOpen ? (
@@ -3148,7 +3215,7 @@ function ContextMenu() {
         {item("Copy", () => state.copy(), <Copy className="size-4" />)}
         {item("Paste", () => state.paste(), <ClipboardPaste className="size-4" />)}
         {rule}
-        {node && item("Rename", () => state.openDialog({ kind: "rename", id: node.id, name: node.name }), <Pencil className="size-4" />)}
+        {node && item("Rename", () => window.dispatchEvent(new Event("datafinder-rename")), <Pencil className="size-4" />)}
         {canDelete && item("Delete", () => state.openDialog({ kind: "delete", ids: selected.length ? selected : [id!] }), <Trash2 className="size-4" />, true)}
         {rule}
         {item("New folder", () => state.openDialog({ kind: "new", file: false, parentId: createIn }), <FolderPlus className="size-4" />)}
@@ -4145,7 +4212,11 @@ export function FileManager() {
       } else if (e.key === "F2") {
         const id = store.panes[index].selected[0];
         const node = id ? store.nodes[id] : undefined;
-        if (node) store.openDialog({ kind: "rename", id, name: node.name });
+        if (node?.parentId && node.kind !== "drive" && node.kind !== "computer") {
+          e.preventDefault();
+          revealRow(index, visible.indexOf(id));
+          window.dispatchEvent(new Event("datafinder-rename"));
+        }
       } else if (e.key === "Enter") {
         const id = store.panes[index].selected[0];
         if (id && store.nodes[id]) store.openItem(index, id);
