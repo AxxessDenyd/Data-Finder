@@ -275,6 +275,7 @@ interface FileState extends FsSnapshot {
   itemChecks: boolean;
   showExt: boolean;
   previewOpen: boolean;
+  pendingRename: string | null;
   uiRev: number;
   helpPage: "manual" | "about";
   helpQuery: string;
@@ -359,6 +360,20 @@ function containsId(snap: FsSnapshot, ancestor: string, id: string) {
 function logLine(message: string) {
   const stamp = new Date().toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", second: "2-digit" });
   return `${stamp}  ${message}`;
+}
+
+function duplicateName(name: string, taken: Set<string>) {
+  const dot = name.lastIndexOf(".");
+  const stem = dot > 0 ? name.slice(0, dot) : name;
+  const ext = dot > 0 ? name.slice(dot) : "";
+  let candidate = `${stem} - Copy${ext}`;
+  let n = 2;
+  while (taken.has(candidate.toLowerCase())) {
+    candidate = `${stem} - Copy (${n})${ext}`;
+    n += 1;
+  }
+  taken.add(candidate.toLowerCase());
+  return candidate;
 }
 
 function uniqueName(nodes: Record<string, FsNode>, order: Record<string, string[]>, parent: string, name: string) {
@@ -589,12 +604,13 @@ interface Actions {
   toggleLog: () => void;
   toggleTransfers: () => void;
   toggleFavorite: (id?: string) => void;
-  newItem: (name: string, file: boolean, parentId?: string) => void;
+  newItem: (name: string, file: boolean, parentId?: string, renameAfter?: boolean) => void;
   rename: (id: string, name: string) => void;
   remove: (ids: string[]) => void;
   copy: () => void;
   cut: () => void;
   paste: () => void;
+  duplicate: () => void;
   transferTo: (ids: string[], dest: string, mode: "copy" | "move", opts?: { policy?: ConflictPolicy; log?: boolean }) => void;
   selectTransfer: (id: string) => void;
   abortTransfer: (id?: string) => void;
@@ -909,6 +925,7 @@ export const useFiles = create<FileState & Actions>((set, get) => ({
   itemChecks: false,
   showExt: true,
   previewOpen: true,
+  pendingRename: null,
   uiRev: 3,
   helpPage: "manual",
   helpQuery: "",
@@ -1309,7 +1326,7 @@ export const useFiles = create<FileState & Actions>((set, get) => ({
       };
     }),
 
-  newItem: (name, file, parentId) => {
+  newItem: (name, file, parentId, renameAfter) => {
     const trimmed = name.trim();
     if (!trimmed) return;
     const state = get();
@@ -1323,7 +1340,10 @@ export const useFiles = create<FileState & Actions>((set, get) => ({
           await reloadDiskFolder(parent);
           const created = (get().order[parent] ?? []).find((item) => get().nodes[item]?.name === trimmed);
           set({ dialog: null, status: file ? `Created file ${trimmed}` : `Created folder ${trimmed}` });
-          if (created) get().selectOnly(state.active, created);
+          if (created) {
+            get().selectOnly(state.active, created);
+            if (renameAfter) set({ pendingRename: created });
+          }
         } catch (error) {
           set({ dialog: null, status: error instanceof Error ? error.message : "Could not create that item" });
         }
@@ -1359,6 +1379,7 @@ export const useFiles = create<FileState & Actions>((set, get) => ({
     });
     if (state.panes[state.active].pathId !== parent) get().navigate(state.active, parent);
     get().selectOnly(state.active, id);
+    if (renameAfter) set({ pendingRename: id });
   },
 
   rename: (id, name) => {
@@ -1483,6 +1504,67 @@ export const useFiles = create<FileState & Actions>((set, get) => ({
       return;
     }
     get().transferTo(state.clipboard.ids, state.panes[state.active].pathId, state.clipboard.mode === "cut" ? "move" : "copy");
+  },
+
+  duplicate: () => {
+    const state = get();
+    const index = state.active;
+    const parent = state.panes[index].pathId;
+    const ids = state.panes[index].selected.filter((id) => {
+      const node = state.nodes[id];
+      return !!node && node.parentId === parent && node.kind !== "drive" && node.kind !== "computer";
+    });
+    if (!ids.length) {
+      set({ status: "Select something in this folder" });
+      return;
+    }
+    const taken = new Set((state.order[parent] ?? []).map((id) => state.nodes[id]?.name.toLowerCase()).filter((name): name is string => !!name));
+    const planned = ids.map((id) => ({ id, name: duplicateName(state.nodes[id].name, taken), source: state.nodes[id] }));
+    if (isDiskId(parent) || ids.some((id) => isDiskId(id))) {
+      if (!isDiskId(parent) || ids.some((id) => !isDiskId(id))) {
+        set({ status: "Real files only copy into a real folder" });
+        return;
+      }
+      const jobs: DiskJob[] = planned.map((item) => ({ id: item.id, name: item.name, sourceName: item.source.name, parentId: parent }));
+      set({ status: `Duplicating ${jobs.length} item(s)` });
+      void diskTransfer(jobs, parent, "copy")
+        .then(async () => {
+          await reloadDiskFolder(parent);
+          const wanted = new Set(planned.map((item) => item.name.toLowerCase()));
+          const selected = (get().order[parent] ?? []).filter((id) => wanted.has(get().nodes[id]?.name.toLowerCase() ?? ""));
+          if (selected.length) get().selectIds(index, selected);
+          set({ status: `Duplicated ${jobs.length} item(s)`, pendingRename: selected.length === 1 ? selected[0] : null });
+        })
+        .catch((error: unknown) => {
+          set({ status: error instanceof Error ? error.message : "Could not duplicate that" });
+        });
+      return;
+    }
+    let seq = state.seq;
+    const alloc = () => `n${seq++}`;
+    const nodes: Record<string, FsNode> = { ...state.nodes };
+    const order: Record<string, string[]> = {};
+    for (const [key, kids] of Object.entries(state.order)) order[key] = [...kids];
+    const selected: string[] = [];
+    for (const item of planned) {
+      const cloned = cloneSubtree(state, item.id, parent, alloc);
+      const rootId = cloned.orderAdds.find(([folder]) => folder === parent)?.[1];
+      if (!rootId || !cloned.nodes[rootId]) continue;
+      cloned.nodes[rootId] = { ...cloned.nodes[rootId], name: item.name };
+      Object.assign(nodes, cloned.nodes);
+      for (const [folder, child] of cloned.orderAdds) order[folder] = [...(order[folder] ?? []), child];
+      selected.push(rootId);
+    }
+    set({
+      nodes: fillFolderSizes(nodes, order),
+      order,
+      seq,
+      status: `Duplicated ${selected.length} item(s)`,
+      log: [...state.log, logLine(`Duplicated ${selected.length} item(s)`)],
+      undoStack: selected.length ? rememberUndo(state, `duplicate ${selected.length}`) : state.undoStack,
+      pendingRename: selected.length === 1 ? selected[0] : null,
+    });
+    if (selected.length) get().selectIds(index, selected);
   },
 
   transferTo: (ids, dest, mode, opts) => {

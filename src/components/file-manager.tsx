@@ -754,7 +754,7 @@ function HomeRibbon() {
   return (
     <div className="flex flex-wrap items-center gap-1 px-2 py-1">
       <SectionMenu label="New">
-        <MenuAction label="Folder" icon={<FolderPlus className="size-4" />} onClick={() => store().newItem(freshName("New folder"), false)} />
+        <MenuAction label="Folder" icon={<FolderPlus className="size-4" />} onClick={() => store().newItem(freshName("New folder"), false, undefined, true)} />
         <MenuAction label="Text document" icon={<FileText className="size-4" />} onClick={() => store().newItem(freshName("New Text Document.txt"), true)} />
         <MenuAction label="Markdown" icon={<FileText className="size-4" />} onClick={() => store().newItem(freshName("Notes.md"), true)} />
         <MenuAction label="Spreadsheet" icon={<Table className="size-4" />} onClick={() => store().newItem(freshName("Sheet.csv"), true)} />
@@ -793,6 +793,7 @@ function HomeRibbon() {
       <span className="mx-1 h-5 w-px bg-ribbon-edge" />
       <RibbonButton label="Cut" disabled={!selected.length} icon={<Scissors className="size-4" />} onClick={() => store().cut()} />
       <RibbonButton label="Copy" disabled={!selected.length} icon={<Copy className="size-4" />} onClick={() => store().copy()} />
+      <RibbonButton label="Duplicate" disabled={!selected.length} icon={<Files className="size-4" />} onClick={() => store().duplicate()} />
       <RibbonButton label="Paste" icon={<ClipboardPaste className="size-4" />} onClick={() => store().paste()} />
       <RibbonButton label="Rename" disabled={selected.length !== 1} icon={<Pencil className="size-4" />} onClick={() => window.dispatchEvent(new Event("datafinder-rename"))} />
       <RibbonButton label="Delete" disabled={!selected.length} icon={<Trash2 className="size-4" />} onClick={() => selected.length && store().openDialog({ kind: "delete", ids: selected })} />
@@ -1435,6 +1436,7 @@ function samePane(a: ReturnType<typeof useFiles.getState>, b: ReturnType<typeof 
     && a.itemChecks === b.itemChecks
     && a.detailsOpen === b.detailsOpen
     && a.previewOpen === b.previewOpen
+    && a.pendingRename === b.pendingRename
     && a.dateFormat === b.dateFormat
     && a.timeFormat === b.timeFormat
     && a.barMode === b.barMode
@@ -1481,6 +1483,14 @@ function PaneView({ index }: { index: 0 | 1 }) {
     return () => window.removeEventListener("datafinder-rename", onRename);
   }, [index]);
   useEffect(() => setNaming(null), [pane.pathId]);
+  useEffect(() => {
+    const pending = state.pendingRename;
+    if (!pending || state.active !== index) return;
+    const node = nodes[pending];
+    if (!node || pane.selected[0] !== pending) return;
+    setNaming({ id: pending, value: node.name });
+    useFiles.setState({ pendingRename: null });
+  }, [state.pendingRename, index, nodes, pane.selected, state.active]);
   const snap = { nodes, order };
   const drive = driveOf(snap, pane.pathId);
   const freePct = drive?.capacity ? Math.round(((drive.free ?? 0) / drive.capacity) * 100) : 0;
@@ -3213,6 +3223,7 @@ function ContextMenu() {
         {rule}
         {item("Cut", () => state.cut(), <Scissors className="size-4" />)}
         {item("Copy", () => state.copy(), <Copy className="size-4" />)}
+        {id && item("Duplicate", () => state.duplicate(), <Files className="size-4" />)}
         {item("Paste", () => state.paste(), <ClipboardPaste className="size-4" />)}
         {rule}
         {node && item("Rename", () => window.dispatchEvent(new Event("datafinder-rename")), <Pencil className="size-4" />)}
@@ -4266,6 +4277,12 @@ export function FileManager() {
       } else if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === "w") {
         e.preventDefault();
         store.closeTab(index, store.panes[index].tab);
+      } else if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === "d") {
+        e.preventDefault();
+        store.duplicate();
+      } else if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === "n") {
+        e.preventDefault();
+        store.newItem(freshName("New folder"), false, undefined, true);
       } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") {
         e.preventDefault();
         store.selectAll(index, visible);
@@ -4292,8 +4309,6 @@ export function FileManager() {
         e.preventDefault();
         store.setTab("inspect");
         requestAnimationFrame(() => document.getElementById("find-box")?.focus());
-      } else if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === "n") {
-        store.openDialog({ kind: "new", file: false });
       } else if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === "m") {
         e.preventDefault();
         store.openDialog({ kind: "mask" });
