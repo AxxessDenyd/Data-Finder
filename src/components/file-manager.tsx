@@ -1033,6 +1033,7 @@ function AboutPage() {
       <dl className="mt-4 max-w-xl space-y-3 text-sm">
         <div><dt className="text-muted">Created</dt><dd>{aboutInfo.created}</dd></div>
         <div><dt className="text-muted">Created by</dt><dd>{aboutInfo.author}</dd></div>
+        <div><dt className="text-muted">Rights</dt><dd>{aboutInfo.rights}</dd></div>
         <div><dt className="text-muted">Version</dt><dd>{aboutInfo.version}</dd></div>
         <div><dt className="text-muted">This copy updated</dt><dd>{aboutInfo.updated}</dd></div>
         <div>

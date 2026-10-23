@@ -2,6 +2,12 @@
 
 Data Finder is a Windows file window. It lists the drives on the computer it runs on and can copy, move, rename, delete, and create real files.
 
+## License
+
+Copyright 2026 William Schneider. All rights reserved.
+
+You may use the official Data Finder program. You may not copy, change, publish, or sell the code without written permission.
+
 ## Build on this PC
 
 The project stays private. GitHub is not used to build or test it.

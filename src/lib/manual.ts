@@ -9,6 +9,7 @@ export const aboutInfo = {
   name: "Data Finder",
   created: "October 2026",
   author: "William Schneider",
+  rights: "Copyright 2026 William Schneider. All rights reserved.",
   updated: "October 20, 2026",
   version: "0.2.19",
   latest: "https://github.com/AxxessDenyd/Data-Finder/releases/latest",

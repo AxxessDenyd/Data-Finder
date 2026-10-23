@@ -3,6 +3,7 @@ name = "data-finder"
 version = "0.2.19"
 edition = "2021"
 description = "Data Finder desktop"
+license = "LicenseRef-AllRightsReserved"
 
 [lib]
 name = "data_finder_lib"
