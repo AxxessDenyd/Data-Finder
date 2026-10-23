@@ -119,12 +119,19 @@ export interface SearchRequest {
   exclude?: string;
 }
 
+export interface FolderTab {
+  key: string;
+  pathId: string;
+}
+
 export interface PaneModel {
   pathId: string;
   selected: string[];
   anchor: string | null;
   back: string[];
   forward: string[];
+  tabs: FolderTab[];
+  tab: string;
   sortKey: SortKey;
   sortDir: "asc" | "desc";
   query: string;
@@ -293,13 +300,36 @@ const defaultFilters: Filters = {
   group: "",
 };
 
+function freshTab(pathId: string): FolderTab {
+  return { key: `t${Date.now().toString(36)}${Math.floor(Math.random() * 1296).toString(36)}`, pathId };
+}
+
+function withTabs(pane: PaneModel): PaneModel {
+  const tabs = pane.tabs?.filter((tab) => tab.pathId).length ? pane.tabs.filter((tab) => tab.pathId) : [freshTab(pane.pathId)];
+  const tab = tabs.some((item) => item.key === pane.tab) ? pane.tab : tabs[0].key;
+  const pathId = tabs.find((item) => item.key === tab)?.pathId ?? pane.pathId;
+  return { ...pane, tabs, tab, pathId };
+}
+
+function moveTab(pane: PaneModel, pathId: string): PaneModel {
+  const ready = withTabs(pane);
+  return {
+    ...ready,
+    pathId,
+    tabs: ready.tabs.map((item) => (item.key === ready.tab ? { ...item, pathId } : item)),
+  };
+}
+
 function pane(pathId = "c"): PaneModel {
+  const tab = freshTab(pathId);
   return {
     pathId,
     selected: [],
     anchor: null,
     back: [],
     forward: [],
+    tabs: [tab],
+    tab: tab.key,
     sortKey: "name",
     sortDir: "asc",
     query: "",
@@ -530,6 +560,9 @@ interface Actions {
   goUp: (index?: 0 | 1) => void;
   goBack: (index?: 0 | 1) => void;
   goForward: (index?: 0 | 1) => void;
+  openTab: (index: 0 | 1, id: string) => void;
+  selectTab: (index: 0 | 1, key: string) => void;
+  closeTab: (index: 0 | 1, key: string) => void;
   refresh: (index?: 0 | 1) => void;
   selectOnly: (index: 0 | 1, id: string) => void;
   toggleSelect: (index: 0 | 1, id: string) => void;
@@ -865,7 +898,7 @@ export const useFiles = create<FileState & Actions>((set, get) => ({
   compact: false,
   itemChecks: false,
   showExt: true,
-  previewOpen: false,
+  previewOpen: true,
   uiRev: 3,
   helpPage: "manual",
   helpQuery: "",
@@ -983,8 +1016,7 @@ export const useFiles = create<FileState & Actions>((set, get) => ({
       const panes = [...state.panes] as [PaneModel, PaneModel];
       const current = panes[index];
       panes[index] = {
-        ...current,
-        pathId: id,
+        ...moveTab(current, id),
         selected: [],
         anchor: null,
         back: push && current.pathId !== id ? [...current.back, current.pathId].slice(-50) : current.back,
@@ -1028,8 +1060,7 @@ export const useFiles = create<FileState & Actions>((set, get) => ({
       const target = paneState.back[paneState.back.length - 1];
       if (!target) return {};
       panes[i] = {
-        ...paneState,
-        pathId: target,
+        ...moveTab(paneState, target),
         selected: [],
         anchor: null,
         back: paneState.back.slice(0, -1),
@@ -1050,8 +1081,7 @@ export const useFiles = create<FileState & Actions>((set, get) => ({
       const target = paneState.forward.at(-1);
       if (!target) return {};
       panes[i] = {
-        ...paneState,
-        pathId: target,
+        ...moveTab(paneState, target),
         selected: [],
         anchor: null,
         forward: paneState.forward.slice(0, -1),
@@ -1060,6 +1090,55 @@ export const useFiles = create<FileState & Actions>((set, get) => ({
       return { panes, active: i, recent: remember(state.recent, target), status: displayPath(state, target) };
     });
     if (get().calcDirs) void get().calcSizes(i);
+  },
+
+  openTab: (index, id) => {
+    const node = get().nodes[id];
+    if (!node || node.kind === "file") return;
+    set((state) => {
+      const panes = [...state.panes] as [PaneModel, PaneModel];
+      const current = withTabs(panes[index]);
+      const tab = freshTab(id);
+      const same = current.pathId === id;
+      panes[index] = {
+        ...current,
+        tabs: [...current.tabs, tab].slice(-8),
+        tab: tab.key,
+        pathId: id,
+        selected: [],
+        anchor: null,
+        back: same ? current.back : [...current.back, current.pathId].slice(-50),
+        forward: same ? current.forward : [],
+        notice: "",
+      };
+      return { panes, active: index, status: same ? "New tab" : displayPath(state, id) };
+    });
+    if (get().calcDirs) void get().calcSizes(index);
+  },
+
+  selectTab: (index, key) => {
+    const next = withTabs(get().panes[index]).tabs.find((item) => item.key === key);
+    if (!next || !get().nodes[next.pathId]) return;
+    set((state) => {
+      const panes = [...state.panes] as [PaneModel, PaneModel];
+      const current = withTabs(panes[index]);
+      panes[index] = { ...current, tab: key, pathId: next.pathId, selected: [], anchor: null, notice: "" };
+      return { panes, active: index, status: displayPath(state, next.pathId) };
+    });
+  },
+
+  closeTab: (index, key) => {
+    const current = withTabs(get().panes[index]);
+    if (current.tabs.length < 2) return;
+    const tabs = current.tabs.filter((item) => item.key !== key);
+    const tab = current.tab === key ? tabs[tabs.length - 1].key : current.tab;
+    const pathId = tabs.find((item) => item.key === tab)?.pathId ?? current.pathId;
+    if (!get().nodes[pathId]) return;
+    set((state) => {
+      const panes = [...state.panes] as [PaneModel, PaneModel];
+      panes[index] = { ...withTabs(panes[index]), tabs, tab, pathId, selected: [], anchor: null };
+      return { panes, active: index, status: displayPath(state, pathId) };
+    });
   },
 
   refresh: (index) => {
@@ -2251,7 +2330,7 @@ export const useFiles = create<FileState & Actions>((set, get) => ({
       const nodes = { ...state.nodes, [drive.id]: { ...drive, mounted: false } };
       const panes = state.panes.map((pane) => {
         const inside = pane.pathId === drive.id || driveOf({ nodes: state.nodes, order: state.order }, pane.pathId)?.id === drive.id;
-        return inside ? { ...pane, pathId: "pc", selected: [] as string[], anchor: null } : pane;
+        return inside ? { ...moveTab(pane, "pc"), selected: [] as string[], anchor: null } : pane;
       }) as [PaneModel, PaneModel];
       set({ nodes, panes, dialog: null, status: `${drive.name} unmounted` });
       return;
@@ -2324,7 +2403,7 @@ export const useFiles = create<FileState & Actions>((set, get) => ({
         const cleaned = dropLoaded(current.nodes, current.order, drive.id);
         const panes = current.panes.map((pane) => {
           const onDrive = pane.pathId === drive.id || driveOf(current, pane.pathId)?.id === drive.id;
-          return onDrive ? { ...pane, pathId: drive.id, selected: [] as string[], anchor: null } : pane;
+          return onDrive ? { ...moveTab(pane, drive.id), selected: [] as string[], anchor: null } : pane;
         }) as [PaneModel, PaneModel];
         return { nodes: cleaned.nodes, order: { ...cleaned.order, [drive.id]: [] }, panes };
       });
@@ -2463,13 +2542,13 @@ export const useFiles = create<FileState & Actions>((set, get) => ({
         compact: prefs.compact ?? state.compact,
         itemChecks: (prefs.uiRev ?? 0) < 4 ? true : (prefs.itemChecks ?? state.itemChecks),
         showExt: prefs.showExt ?? state.showExt,
-        previewOpen: prefs.previewOpen ?? state.previewOpen,
+        previewOpen: (prefs.uiRev ?? 0) < 6 ? true : (prefs.previewOpen ?? true),
         snaps: prefs.snaps ?? state.snaps,
         pins: prefs.pins ?? state.pins,
         pinsOpen,
         recentPaths: prefs.recentPaths ?? state.recentPaths,
         showAllDrives: prefs.showAllDrives ?? false,
-        uiRev: 5,
+        uiRev: 6,
         nodes,
         order,
         seq,
@@ -2477,6 +2556,7 @@ export const useFiles = create<FileState & Actions>((set, get) => ({
           const wanted = prefs.paths?.[index];
           const pathId = wanted && nodes[wanted] ? wanted : nodes[item.pathId] ? item.pathId : "c";
           const sort = savedSort(prefs.sort?.[index], item);
+          const tab = freshTab(pathId);
           return {
             ...item,
             pathId,
@@ -2484,6 +2564,8 @@ export const useFiles = create<FileState & Actions>((set, get) => ({
             anchor: null,
             back: [] as string[],
             forward: [] as string[],
+            tabs: [tab],
+            tab: tab.key,
             flat: prefs.flat?.[index] ?? item.flat,
             sortKey: sort.sortKey,
             sortDir: sort.sortDir,

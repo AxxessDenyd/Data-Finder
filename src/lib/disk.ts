@@ -292,6 +292,16 @@ export async function diskRemoveNamed(parentId: string, name: string, recursive:
 
 const TEXT = new Set(["txt", "md", "json", "csv", "log", "xml", "html", "css", "js", "ts", "ps1", "ini", "cfg"]);
 
+export interface FilePeek {
+  kind: "image" | "text" | "none";
+  body: string;
+  note: string;
+}
+
+export function peekFile(path: string): Promise<FilePeek> {
+  return invoke<FilePeek>("peek_file", { path });
+}
+
 export async function readDiskText(id: string, name: string): Promise<string | null> {
   const ext = name.includes(".") ? name.slice(name.lastIndexOf(".") + 1).toLowerCase() : "";
   if (!TEXT.has(ext)) return null;

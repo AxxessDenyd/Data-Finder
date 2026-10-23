@@ -73,7 +73,7 @@ import {
   type ViewMode,
 } from "@/lib/file-store";
 import { childrenOf, driveCaption, formatDate, formatSize, pathIds, resolvePath, typeLabel, type FsNode } from "@/lib/vfs";
-import { bitlockerOff, bitlockerOn, bitlockerReadKey, bitlockerSaveKey, bitlockerStatus, bitlockerUnlock, chooseFolder, chooseKeyFile, diskPath, dragOut, driveMask, earlierCopy, earlierEntries, earlierList, isDesktop, isDiskId, listSnapshots, mapNetwork, measurePath, mountVolume, openExternal, recoveryClear, recoverySave, recoveryStart, recoveryStatus, recoveryStop, removeSnapshot, restoreSetup, restoreSnapshot, restoreStatus, withoutDisk, type BitLockerDrive, type DiskSnapshot, type EarlierCopy, type EarlierEntry, type ExactSize, type RecoveryHit, type RecoveryStatus, type RestoreStatus } from "@/lib/disk";
+import { bitlockerOff, bitlockerOn, bitlockerReadKey, bitlockerSaveKey, bitlockerStatus, bitlockerUnlock, chooseFolder, chooseKeyFile, diskPath, dragOut, driveMask, earlierCopy, earlierEntries, earlierList, isDesktop, isDiskId, listSnapshots, mapNetwork, measurePath, mountVolume, openExternal, peekFile, recoveryClear, recoverySave, recoveryStart, recoveryStatus, recoveryStop, removeSnapshot, restoreSetup, restoreSnapshot, restoreStatus, withoutDisk, type BitLockerDrive, type DiskSnapshot, type EarlierCopy, type EarlierEntry, type ExactSize, type FilePeek, type RecoveryHit, type RecoveryStatus, type RestoreStatus } from "@/lib/disk";
 import { aboutInfo, manualSections } from "@/lib/manual";
 
 const UI_KEY = "data-finder-ui";
@@ -1284,7 +1284,13 @@ function IconBoard({ index, rows, mode, columns, cellHeight }: { index: 0 | 1; r
                 else if (e.metaKey || e.ctrlKey) useFiles.getState().toggleSelect(index, row.id);
                 else useFiles.getState().selectOnly(index, row.id);
               }}
-              onDoubleClick={() => row.nodeId && useFiles.getState().openItem(index, row.nodeId)}
+              onDoubleClick={(event) => {
+                if ((event.ctrlKey || event.metaKey) && row.nodeId && row.kind !== "file") {
+                  useFiles.getState().openTab(index, row.nodeId);
+                  return;
+                }
+                row.nodeId && useFiles.getState().openItem(index, row.nodeId);
+              }}
               onContextMenu={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
@@ -1314,14 +1320,44 @@ function PreviewPane({ index }: { index: 0 | 1 }) {
   const showExt = useFiles((s) => s.showExt);
   const id = pane.selected[0];
   const node = id ? nodes[id] : undefined;
+  const [peek, setPeek] = useState<FilePeek | null>(null);
+  useEffect(() => {
+    if (!node || node.kind !== "file" || !isDesktop()) {
+      setPeek(null);
+      return;
+    }
+    const path = diskPath(node.id);
+    if (!path) {
+      setPeek(null);
+      return;
+    }
+    let cancel = false;
+    setPeek(null);
+    void peekFile(path)
+      .then((next) => {
+        if (!cancel) setPeek(next);
+      })
+      .catch(() => {
+        if (!cancel) setPeek(null);
+      });
+    return () => {
+      cancel = true;
+    };
+  }, [id, node?.kind, node?.name]);
   return (
     <aside className="hidden w-72 shrink-0 flex-col border-l border-line bg-tree p-4 lg:flex">
       {node ? (
         <>
-          <Icon node={node} className="size-16" />
+          {peek?.kind === "image" ? (
+            <img src={peek.body} alt="" className="max-h-52 w-full rounded-md object-contain" />
+          ) : (
+            <Icon node={node} className="size-16" />
+          )}
           <h2 className="mt-3 truncate text-sm font-semibold" title={node.name}>{node.kind === "drive" ? driveCaption(node) : shownName(node.name, node.kind, showExt)}</h2>
           <p className="mt-1 text-xs text-muted">{typeLabel(node)}</p>
           <p className="mt-3 text-sm">{node.kind === "file" ? formatSize(node.bytes) : shownSize(node.bytes, node.approx) || "Folder"}</p>
+          {peek?.note && <p className="mt-2 text-xs text-muted">{peek.note}</p>}
+          {peek?.kind === "text" && <pre className="mt-3 max-h-64 overflow-auto whitespace-pre-wrap break-words text-xs">{peek.body}</pre>}
           {node.note && <p className="mt-2 text-sm text-muted">{node.note}</p>}
         </>
       ) : (
@@ -1462,6 +1498,22 @@ function PaneView({ index }: { index: 0 | 1 }) {
       className={"relative flex h-full min-h-0 flex-1 flex-col bg-pane " + (active === index ? "border-l-4 border-l-accent" : "border-l-4 border-l-transparent")}
       onMouseDown={() => useFiles.getState().setActive(index)}
     >
+      <div className="flex items-center gap-1 overflow-x-auto border-b border-line bg-header px-1">
+        {(pane.tabs?.length ? pane.tabs : [{ key: pane.tab, pathId: pane.pathId }]).map((tab) => {
+          const tabNode = nodes[tab.pathId];
+          const label = tabNode ? (tabNode.kind === "drive" ? driveCaption(tabNode) : tabNode.name) : "Folder";
+          const on = tab.key === pane.tab;
+          return (
+            <span key={tab.key} className={"flex h-8 max-w-40 shrink-0 items-center rounded-t-md " + (on ? "bg-pane text-ink" : "text-muted")}>
+              <button type="button" className="min-w-0 flex-1 truncate px-2 text-left text-xs" title={label} onClick={() => useFiles.getState().selectTab(index, tab.key)}>{label}</button>
+              {pane.tabs.length > 1 && (
+                <button type="button" className="px-1 text-xs text-muted hover:text-ink" aria-label={`Close ${label}`} onClick={() => useFiles.getState().closeTab(index, tab.key)}>×</button>
+              )}
+            </span>
+          );
+        })}
+        <button type="button" className="grid size-7 shrink-0 place-items-center rounded-md text-sm text-muted hover:bg-select" aria-label="New tab" onClick={() => useFiles.getState().openTab(index, pane.pathId)}>+</button>
+      </div>
       <div className="flex items-center gap-1 border-b border-line bg-header px-1">
         <IconButton label="Back" disabled={!pane.back.length} onClick={() => useFiles.getState().goBack(index)}><ChevronLeft className="size-4" /></IconButton>
         <IconButton label="Forward" disabled={!pane.forward.length} onClick={() => useFiles.getState().goForward(index)}><ChevronRight className="size-4" /></IconButton>
@@ -1658,7 +1710,13 @@ function PaneView({ index }: { index: 0 | 1 }) {
                       else if (e.metaKey || e.ctrlKey) useFiles.getState().toggleSelect(index, row.id);
                       else useFiles.getState().selectOnly(index, row.id);
                     }}
-                    onDoubleClick={() => openRow(row)}
+                    onDoubleClick={(event) => {
+                      if ((event.ctrlKey || event.metaKey) && row.nodeId && row.kind !== "file") {
+                        useFiles.getState().openTab(index, row.nodeId);
+                        return;
+                      }
+                      openRow(row);
+                    }}
                     onDragStart={(e) => {
                       if (dragSelect.moved || !row.nodeId) {
                         e.preventDefault();
@@ -3063,6 +3121,7 @@ function ContextMenu() {
       <button type="button" aria-label="Close menu" className="fixed inset-0 z-30" onMouseDown={(e) => { if (e.button === 0) useFiles.getState().openMenu(null); }} onContextMenu={(e) => e.preventDefault()} />
       <div ref={ref} className="fixed z-40 w-56 overflow-auto rounded-lg border border-line bg-menu p-1 shadow-xl" style={{ left: place.left, top: place.top, maxHeight: place.maxHeight }}>
         {id && item("Open", () => state.openItem(active, id), <Folder className="size-4" />)}
+        {id && node && node.kind !== "file" && item("Open in new tab", () => state.openTab(active, id), <FolderPlus className="size-4" />)}
         {id && node?.kind !== "drive" && item("Show in folder", () => state.reveal(active, id), <Folder className="size-4" />)}
         {rule}
         {item("Cut", () => state.cut(), <Scissors className="size-4" />)}
@@ -3984,7 +4043,7 @@ export function FileManager() {
         showExt: state.showExt,
         previewOpen: state.previewOpen,
         snaps: state.snaps,
-        uiRev: 5,
+        uiRev: 6,
         pins: state.pins,
         pinsOpen: state.pinsOpen,
         recentPaths: state.recentPaths,
@@ -4092,6 +4151,12 @@ export function FileManager() {
           revealRow(index, hit);
           useFiles.setState({ status: `Jump to ${typedName}` });
         }
+      } else if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === "t") {
+        e.preventDefault();
+        store.openTab(index, store.panes[index].pathId);
+      } else if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === "w") {
+        e.preventDefault();
+        store.closeTab(index, store.panes[index].tab);
       } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") {
         e.preventDefault();
         store.selectAll(index, visible);

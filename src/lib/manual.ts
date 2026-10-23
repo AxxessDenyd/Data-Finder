@@ -11,7 +11,7 @@ export const aboutInfo = {
   author: "William Schneider",
   rights: "Copyright 2026 William Schneider. All rights reserved.",
   updated: "October 23, 2026",
-  version: "0.2.20",
+  version: "0.2.21",
   releases: "https://github.com/AxxessDenyd/Data-Finder/releases",
   latest: "https://github.com/AxxessDenyd/Data-Finder/releases/latest",
   setup: "https://github.com/AxxessDenyd/Data-Finder/releases/latest/download/Data-Finder-Setup.exe",
@@ -123,6 +123,8 @@ export const manualSections: ManualSection[] = [
     items: [
       "Enter opens. Backspace or Alt+Up goes up. Alt+Left goes back. Alt+Right goes forward. F5 refreshes. F2 renames. Delete removes. Home and End jump to the first and last name.",
       "Type the start of a name to jump to it. Type the same letter again to move to the next match. Ctrl+L edits the path.",
+      "Ctrl+T opens another folder tab. Ctrl+W closes it. Right-click a folder and choose Open in new tab, or hold Ctrl and double-click it. Each pane keeps its own tabs.",
+      "The preview pane shows a picture, or the start of a text file, beside the list. Turn it on from View, then Preview pane.",
       "Ctrl+C, Ctrl+X, and Ctrl+V copy, cut, and paste. Ctrl+A selects the folder. Ctrl+Shift+C copies the location.",
       "Ctrl+F opens Find. Ctrl+Shift+F starts a deep search. Ctrl+Shift+N makes a folder.",
       "Alt+Enter opens Info. Escape closes a menu or a dialog.",

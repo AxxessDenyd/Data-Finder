@@ -1,6 +1,6 @@
 [package]
 name = "data-finder"
-version = "0.2.20"
+version = "0.2.21"
 edition = "2021"
 description = "Data Finder desktop"
 license = "LicenseRef-AllRightsReserved"

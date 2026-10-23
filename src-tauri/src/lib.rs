@@ -788,6 +788,86 @@ fn read_text(path: String) -> Result<String, String> {
     Ok(buf)
 }
 
+#[derive(Serialize)]
+struct FilePeek {
+    kind: String,
+    body: String,
+    note: String,
+}
+
+fn encode_base64(data: &[u8]) -> String {
+    const TABLE: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::new();
+    let mut index = 0;
+    while index + 3 <= data.len() {
+        let value = ((data[index] as u32) << 16) | ((data[index + 1] as u32) << 8) | data[index + 2] as u32;
+        out.push(TABLE[((value >> 18) & 63) as usize] as char);
+        out.push(TABLE[((value >> 12) & 63) as usize] as char);
+        out.push(TABLE[((value >> 6) & 63) as usize] as char);
+        out.push(TABLE[(value & 63) as usize] as char);
+        index += 3;
+    }
+    if index < data.len() {
+        let left = data[index] as u32;
+        let right = if index + 1 < data.len() { data[index + 1] as u32 } else { 0 };
+        let value = (left << 16) | (right << 8);
+        out.push(TABLE[((value >> 18) & 63) as usize] as char);
+        out.push(TABLE[((value >> 12) & 63) as usize] as char);
+        if index + 1 < data.len() {
+            out.push(TABLE[((value >> 6) & 63) as usize] as char);
+            out.push('=');
+        } else {
+            out.push('=');
+            out.push('=');
+        }
+    }
+    out
+}
+
+#[tauri::command]
+fn peek_file(path: String) -> Result<FilePeek, String> {
+    let meta = fs::metadata(&path).map_err(|err| err.to_string())?;
+    if meta.is_dir() {
+        return Ok(FilePeek { kind: "none".into(), body: String::new(), note: "Folder".into() });
+    }
+    let lower = path.to_lowercase();
+    let ext = lower.rsplit('.').next().unwrap_or("");
+    if ["png", "jpg", "jpeg", "gif", "webp", "bmp"].contains(&ext) {
+        if meta.len() > 8 * 1024 * 1024 {
+            return Ok(FilePeek {
+                kind: "none".into(),
+                body: String::new(),
+                note: "That picture is too large to preview. Double-click to open it.".into(),
+            });
+        }
+        let bytes = fs::read(&path).map_err(|err| err.to_string())?;
+        let mime = match ext {
+            "png" => "image/png",
+            "gif" => "image/gif",
+            "webp" => "image/webp",
+            "bmp" => "image/bmp",
+            _ => "image/jpeg",
+        };
+        return Ok(FilePeek {
+            kind: "image".into(),
+            body: format!("data:{mime};base64,{}", encode_base64(&bytes)),
+            note: String::new(),
+        });
+    }
+    if ["txt", "md", "json", "csv", "log", "xml", "html", "css", "js", "ts", "tsx", "ps1", "ini", "cfg", "rs", "py", "yml", "yaml", "toml"].contains(&ext) {
+        let file = File::open(&path).map_err(|err| err.to_string())?;
+        let mut limited = file.take(24 * 1024);
+        let mut bytes = Vec::new();
+        limited.read_to_end(&mut bytes).map_err(|err| err.to_string())?;
+        return Ok(FilePeek {
+            kind: "text".into(),
+            body: String::from_utf8_lossy(&bytes).to_string(),
+            note: if meta.len() > 24 * 1024 { "Showing the start of the file.".into() } else { String::new() },
+        });
+    }
+    Ok(FilePeek { kind: "none".into(), body: String::new(), note: String::new() })
+}
+
 #[tauri::command]
 fn mount_image(path: String) -> Result<String, String> {
     #[cfg(windows)]
@@ -2364,6 +2444,7 @@ pub fn run() {
             rename_path,
             remove_path,
             read_text,
+            peek_file,
             copy_item,
             move_item,
             measure_children,
