@@ -1,13 +1,8 @@
 name: Windows program
 
+# Builds stay on the PC. This file is only for a manual run if GitHub billing works again.
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths-ignore:
-      - "Data-Finder.exe"
-      - "Data-Finder-Setup.exe"
-      - "release/**"
 
 permissions:
   contents: write

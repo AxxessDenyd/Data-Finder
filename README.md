@@ -2,6 +2,20 @@
 
 Data Finder is a Windows file window. It lists the drives on the computer it runs on and can copy, move, rename, delete, and create real files.
 
+## Build on this PC
+
+The project stays private. GitHub is not used to build or test it.
+
+Install these free tools once, then close and reopen any window you already had open:
+
+1. [Node.js](https://nodejs.org) — the long-term version.
+2. [Rust](https://rustup.rs) — take the default Windows install.
+3. [Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) — check **Desktop development with C++**, then install.
+
+Download this project while you are signed in to GitHub, or open the copy you already have. Double-click **Build-Data-Finder.bat**. The first build can take several minutes. When it finishes, a folder named **Built** opens.
+
+Close Data Finder if it is already open. Then double-click **Data Finder.exe** in that folder, or run **Data Finder Setup.exe** to install it for your Windows user.
+
 ## Download
 
 Close Data Finder before you replace a file that is already open.
