@@ -1695,8 +1695,8 @@ fn capture_ps(body: &str, elevate: bool) -> Result<String, String> {
 fn read_progress(path: &Path) -> Option<(u32, u32, String)> {
     let text = fs::read_to_string(path).ok()?;
     let mut parts = text.trim().splitn(3, '|');
-    let done = parts.next()?.trim().parse().ok()?;
-    let total = parts.next()?.trim().parse().ok()?;
+    let done = parts.next()?.trim().parse::<u32>().ok()?;
+    let total = parts.next()?.trim().parse::<u32>().ok()?;
     if total == 0 {
         return None;
     }
